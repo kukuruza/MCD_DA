@@ -74,9 +74,9 @@ class CityDataSet(data.Dataset):
             label = self.label_transform(label)
 
         if self.test:
-            return img, label, img_file
+            return {'image': img, 'label_map': label, 'url': img_file}
 
-        return img, label
+        return {'image': img, 'label_map': label}
 
 
 class GTADataSet(data.Dataset):
@@ -136,9 +136,9 @@ class GTADataSet(data.Dataset):
             label = self.label_transform(label)
 
         if self.test:
-            return img, label, img_file
+            return {'image': img, 'label_map': label, 'url': img_file}
 
-        return img, label
+        return {'image': img, 'label_map': label}
 
 
 class SynthiaDataSet(data.Dataset):
@@ -184,9 +184,9 @@ class SynthiaDataSet(data.Dataset):
             label = self.label_transform(label)
 
         if self.test:
-            return img, label, img_file
+            return {'image': img, 'label_map': label, 'url': img_file}
 
-        return img, label
+        return {'image': img, 'label_map': label}
 
 
 class TestDataSet(data.Dataset):
@@ -223,9 +223,9 @@ class TestDataSet(data.Dataset):
             img = self.img_transform(img)
 
         if self.test:
-            return img, 'hoge', img_file
-        else:
-            return img, img
+            return {'image': img, 'label_map': 'hoge', 'url': img_file}
+
+        return {'image': img, 'label_map': img}
 
 
 def get_dataset(dataset_name, split, img_transform, label_transform, test, input_ch=3):

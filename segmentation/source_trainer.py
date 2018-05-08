@@ -117,7 +117,8 @@ model.train()
 
 for epoch in range(args.epochs):
     epoch_loss = 0
-    for ind, (images, labels) in tqdm(enumerate(train_loader)):
+    for ind, batch in tqdm(enumerate(train_loader)):
+        images, labels = batch['image'], batch['label_map']
 
         imgs = Variable(images)
         lbls = Variable(labels)

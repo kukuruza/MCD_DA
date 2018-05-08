@@ -82,7 +82,8 @@ if torch.cuda.is_available():
     model.cuda()
 
 model.eval()
-for index, (imgs, labels, paths) in tqdm(enumerate(target_loader)):
+for index, batch in tqdm(enumerate(target_loader)):
+    imgs, labels, paths = batch['image'], batch['label_map'], batch['url']
     path = paths[0]
     imgs = Variable(imgs)
     if torch.cuda.is_available():

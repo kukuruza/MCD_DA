@@ -160,8 +160,8 @@ for epoch in range(start_epoch, args.epochs):
 
     for ind, (source, target) in enumerate(train_loader):
 
-        src_imgs, src_lbls = Variable(source[0]), Variable(source[1])
-        tgt_imgs = Variable(target[0])
+        src_imgs, src_lbls = Variable(source[0]['image']), Variable(source[1]['label_map'])
+        tgt_imgs = Variable(target[0]['image'])
 
         if torch.cuda.is_available():
             src_imgs, src_lbls, tgt_imgs = src_imgs.cuda(), src_lbls.cuda(), tgt_imgs.cuda()

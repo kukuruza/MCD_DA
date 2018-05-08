@@ -119,7 +119,8 @@ if torch.cuda.is_available():
     F1.cuda()
     F2.cuda()
 
-for index, (imgs, _, paths) in tqdm(enumerate(target_loader)):
+for index, batch in tqdm(enumerate(target_loader)):
+    imgs, paths = batch['image'], batch['url']
     path = paths[0]
 
     imgs = Variable(imgs)
