@@ -17,6 +17,8 @@ from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontal
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done, save_checkpoint, adjust_learning_rate, \
     get_class_weight_from_file
 
+torch.backends.cudnn.enabled=False
+
 parser = get_da_mcd_training_parser()
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
@@ -156,7 +158,8 @@ for epoch in range(start_epoch, args.epochs):
     d_loss_per_epoch = 0
     c_loss_per_epoch = 0
 
-    for ind, (source, target) in tqdm.tqdm(enumerate(train_loader)):
+    for ind, (source, target) in enumerate(train_loader):
+
         src_imgs, src_lbls = Variable(source[0]), Variable(source[1])
         tgt_imgs = Variable(target[0])
 

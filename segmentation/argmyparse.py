@@ -30,6 +30,8 @@ def get_common_training_parser(parser):
     parser.add_argument('--epochs', type=int, default=10,
                         help='number of epochs to train (default: 10)')
     parser.add_argument("--max_iter", type=int, default=5000)  # Iter per epoch
+    parser.add_argument("--add_bg_loss", action="store_true",
+                        help='whether you add background loss or not')
 
     # ---------- Define Network ---------- #
     parser.add_argument('--net', type=str, default="drn_d_38", help="network structure",
@@ -58,6 +60,8 @@ def get_common_training_parser(parser):
     # ---------- Optional Hyperparameters ---------- #
     parser.add_argument('--augment', action="store_true",
                         help='whether you use data-augmentation or not')
+    parser.add_argument('--loss_weights_file', type=str,
+                        help="csv file with weights for dfferent classes")
 
     # ---------- Input Image Setting ---------- #
     parser.add_argument("--input_ch", type=int, default=3,

@@ -220,7 +220,7 @@ def eval_city(gt_dir, pred_dir, devkit_dir='', dset='cityscapes', add_bg_loss=Fa
         with open("./dataset/synthia2cityscapes_info.json", 'r') as fp:
             info = json.load(fp)
     else:
-        with open(join(devkit_dir, 'data', dset, 'info.json'), 'r') as fp:
+        with open('./dataset/city_info.json', 'r') as fp:
             info = json.load(fp)
 
     if is_label16:
@@ -237,21 +237,27 @@ def eval_city(gt_dir, pred_dir, devkit_dir='', dset='cityscapes', add_bg_loss=Fa
     print(name_classes)
     print("pred path: %s" % os.path.abspath(pred_dir))
 
-    image_path_list = join(devkit_dir, 'data', dset, 'image.txt')
-    label_path_list = join(devkit_dir, 'data', dset, 'label.txt')
+    image_path_list = join(devkit_dir, 'leftImg8bit', 'val.txt')
+    image_list = open(image_path_list, 'r').read().splitlines()
 
-    gt_imgs = open(label_path_list, 'rb').read().splitlines()
-    pred_imgs = open(image_path_list, 'rb').read().splitlines()
-    pred_imgs = [os.path.split(x)[-1] for x in pred_imgs]  # frankfurt/frank***.png -> frank***.png
+    gt_fullpath_list = [os.path.join(devkit_dir, 'gtFine', fn).replace('leftImg8bit', 'gtFine_labelTrainIds') for fn in image_list]
+    pred_fullpath_list = [os.path.join(pred_dir, os.path.split(x)[-1]) for x in image_list]
 
-    if is_label16:
-        gt_fullpath_list = [os.path.join(gt_dir, fn).replace('labelIds', 'label16IDs') for fn in gt_imgs]
-    else:
-        gt_fullpath_list = [os.path.join(gt_dir, fn).replace('labelIds', 'gtlabels') for fn in gt_imgs]
+    assert os.path.exists(gt_fullpath_list[0]), gt_fullpath_list[0]
+    assert os.path.exists(pred_fullpath_list[0]), pred_fullpath_list[0]
 
-    pred_fullpath_list = [os.path.join(pred_dir, fn).replace('gtFine_labelIds', 'leftImg8bit') for fn in pred_imgs]
+#    gt_imgs = open(image_path_list, 'r').read().splitlines()
+#    pred_imgs = [os.path.split(x)[-1] for x in pred_imgs]  # test/frankfurt/frank***.png -> frank***.png
+#    print (gt_imgs[0], pred_imgs[0])
 
-    calc_all_metrics(name_classes, pred_fullpath_list, gt_fullpath_list, consider_background_loss=add_bg_loss)
+#    if is_label16:
+#        gt_fullpath_list = [os.path.join(gt_dir, fn).replace('labelIds', 'label16IDs') for fn in gt_imgs]
+#    else:
+#        gt_fullpath_list = [os.path.join(gt_dir, fn).replace('labelIds', 'gtlabels') for fn in gt_imgs]
+#
+#    pred_fullpath_list = [os.path.join(pred_dir, fn).replace('gtFine_labelIds', 'leftImg8bit') for fn in pred_imgs]
+
+    calc_all_metrics(name_classes, pred_fullpath_list, gt_fullpath_list, consider_background_loss=add_bg_loss, background_id=19)
 
 
 if __name__ == "__main__":

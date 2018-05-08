@@ -29,7 +29,7 @@ def default_loader(path):
 
 class CityDataSet(data.Dataset):
     def __init__(self, root, split="train", img_transform=None, label_transform=None, test=True,
-                 label_type=None):
+                 label_type=None, input_ch=3):
         self.root = root
         self.split = split
         # self.mean_bgr = np.array([104.00698793, 116.66876762, 122.67891434])
@@ -100,12 +100,10 @@ class GTADataSet(data.Dataset):
         data_dir = root
 
         imgsets_dir = osp.join(data_dir, "%s.txt" % split)
-
         with open(imgsets_dir) as imgset_file:
             for name in imgset_file:
                 name = name.strip()
                 img_file = osp.join(data_dir, "%s" % name)
-                # name = name.replace('leftImg8bit','gtFine_labelTrainIds')
                 label_file = osp.join(data_dir, "%s" % name.replace('images', 'labels_gt'))
                 self.files[split].append({
                     "img": img_file,
@@ -241,8 +239,8 @@ def get_dataset(dataset_name, split, img_transform, label_transform, test, input
     }
     ##Note fill in the blank below !! "gta....fill the directory over images folder.
     name2root = {
-        "gta": "",  ## Fill the directory over images folder. put train.txt, val.txt in this folder
-        "city": "",  ## ex, ./www.cityscapes-dataset.com/file-handling
+        "gta": "/media/cat/datasets/GTA5",  ## Fill the directory over images folder. put train.txt, val.txt in this folder
+        "city": "/media/cat/datasets/Cityscrapes",  ## ex, ./www.cityscapes-dataset.com/file-handling
         "city16": "",  ## Same as city
         "synthia": "",  ## synthia/RAND_CITYSCAPES",
     }
@@ -250,11 +248,13 @@ def get_dataset(dataset_name, split, img_transform, label_transform, test, input
     root = name2root[dataset_name]
 
     if dataset_name == "city16":
-        return dataset_obj(root=root, split=split, img_transform=img_transform, label_transform=label_transform,
+        dataset = dataset_obj(root=root, split=split, img_transform=img_transform, label_transform=label_transform,
                            test=test, input_ch=input_ch, label_type="label16")
-
-    return dataset_obj(root=root, split=split, img_transform=img_transform, label_transform=label_transform,
-                       test=test, input_ch=input_ch)
+    else:
+        dataset = dataset_obj(root=root, split=split, img_transform=img_transform, label_transform=label_transform,
+                           test=test, input_ch=input_ch)
+    print ('Initialized dataset "%s" with split "%s" and size %d' % (dataset_name, split, len(dataset)))
+    return dataset
 
 
 def check_src_tgt_ok(src_dataset_name, tgt_dataset_name):

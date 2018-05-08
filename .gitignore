@@ -1,3 +1,12 @@
+segmentation/crf_output
+segmentation/test_output
+segmentation/train_output
+classification/record
+classification/data/svhn
+classification/data/mnist_data.mat
+classification/checkpoint
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

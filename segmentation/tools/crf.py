@@ -8,8 +8,6 @@ import scipy.misc as m
 from PIL import Image
 from tqdm import tqdm
 
-from util import mkdir_if_not_exist
-
 
 def dense_crf(probs, img=None, n_iters=10,
               sxy_gaussian=(1, 1), compat_gaussian=4,
@@ -84,8 +82,8 @@ if __name__ == '__main__':
 
     args.outimg_shape = [int(x) for x in args.outimg_shape]
 
-    mkdir_if_not_exist(args.outdir)
-
+    if not os.path.exists(args.outdir):
+        os.makedirs(args.outdir)
 
     for one_file in tqdm(os.listdir(args.prob_indir)):
         one_npy_fn = os.path.join(args.prob_indir, one_file)
@@ -115,7 +113,8 @@ if __name__ == '__main__':
 
         # save prob after crf
         if args.prob_outdir:
-            mkdir_if_not_exist(args.prob_outdir)
+            if not os.path.exists(args.prob_outdir):
+                os.makedirs(args.prob_outdir)
             out_npy_file = os.path.join(args.prob_outdir, one_file)
             np.save(out_npy_file, np.transpose(out[0], (2, 0, 1)))
 

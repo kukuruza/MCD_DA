@@ -149,10 +149,10 @@ class Solver(object):
             if batch_idx % self.interval == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss1: {:.6f}\t Loss2: {:.6f}\t  Discrepancy: {:.6f}'.format(
                     epoch, batch_idx, 100,
-                    100. * batch_idx / 70000, loss_s1.data[0], loss_s2.data[0], loss_dis.data[0]))
+                    100. * batch_idx / 70000, loss_s1.item(), loss_s2.item(), loss_dis.item()))
                 if record_file:
                     record = open(record_file, 'a')
-                    record.write('%s %s %s\n' % (loss_dis.data[0], loss_s1.data[0], loss_s2.data[0]))
+                    record.write('%s %s %s\n' % (loss_dis.item(), loss_s1.item(), loss_s2.item()))
                     record.close()
         return batch_idx
 
