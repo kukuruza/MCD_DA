@@ -15,9 +15,26 @@ from transform import HorizontalFlip, VerticalFlip
 class ConcatDataset(torch.utils.data.Dataset):
     def __init__(self, *datasets):
         self.datasets = datasets
+        assert len(self.datasets) == 2, 'For now 2 is enough'
+
+        self.indlist2 = np.arange(len(self.datasets[1]))
+        np.random.shuffle(self.indlist2)
+        self.index2 = -1
+
+    def increment_index2(self):
+        if self.index2 == len(self.indlist2) - 1:
+            np.random.shuffle(self.indlist2)
+            self.index2 = 0
+        else:
+            self.index2 += 1
 
     def __getitem__(self, i):
-        return tuple(d[i] for d in self.datasets)
+        self.increment_index2()
+        return tuple(
+            self.datasets[0][i],
+            self.datasets[1][self.indlist2[self.index2]]
+        )
+        #return tuple(d[i] for d in self.datasets)
 
     def __len__(self):
         return min(len(d) for d in self.datasets)
