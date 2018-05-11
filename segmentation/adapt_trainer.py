@@ -4,6 +4,7 @@ import os
 
 import torch
 import tqdm
+import logging
 from PIL import Image
 from tensorboard_logger import configure, log_value
 from torch.autograd import Variable
@@ -17,6 +18,7 @@ from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontal
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done, save_checkpoint, adjust_learning_rate, \
     get_class_weight_from_file
 
+logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 torch.backends.cudnn.enabled=False
 
 parser = get_da_mcd_training_parser()
@@ -160,8 +162,8 @@ for epoch in range(start_epoch, args.epochs):
 
     for ind, (source, target) in enumerate(train_loader):
 
-        src_imgs, src_lbls = Variable(source[0]['image']), Variable(source[1]['label_map'])
-        tgt_imgs = Variable(target[0]['image'])
+        src_imgs, src_lbls = Variable(source['image']), Variable(source['label_map'])
+        tgt_imgs = Variable(target['image'])
 
         if torch.cuda.is_available():
             src_imgs, src_lbls, tgt_imgs = src_imgs.cuda(), src_lbls.cuda(), tgt_imgs.cuda()

@@ -2,6 +2,8 @@ import collections
 import glob
 import os
 import os.path as osp
+import logging
+from math import floor
 
 import numpy as np
 import torch
@@ -30,7 +32,7 @@ class ConcatDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, i):
         self.increment_index2()
-        return tuple(
+        return (
             self.datasets[0][i],
             self.datasets[1][self.indlist2[self.index2]]
         )
@@ -206,6 +208,65 @@ class SynthiaDataSet(data.Dataset):
         return {'image': img, 'label_map': label}
 
 
+class CitycamDataSet(data.Dataset):
+
+    def __init__(self, root, split, img_transform=None, label_transform=None,
+                test=False, input_ch=3):
+        import os, sys
+        sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
+        from db.lib.dbDataset import CityimagesDataset, CitycarsDataset, CitymatchesDataset
+        from db.lib.helperDb import carField
+
+        self.img_transform = img_transform
+        self.label_transform = label_transform
+        self.carField = carField
+
+        db_file = os.path.realpath(os.path.join(root, split + '.db'))
+        logging.info('CitycamDataSet: db_file is resolved to "%s"' % db_file)
+        self.dataset = CitycarsDataset(db_file=db_file,
+                fraction=1., crop_car=False, randomly=False, with_mask=True)
+        self.size = len(self.dataset)
+
+    def __getitem__(self, index):
+        car_entry = self.dataset[index]
+
+        imagefile = self.carField(car_entry['entry'], 'imagefile')
+
+        image_original = car_entry['image'].copy()
+        if self.img_transform:
+            image = Image.fromarray(image_original)
+            image = self.img_transform(image)
+
+        #print (car_entry['entry'])
+        item = {'image': image, 'url': imagefile, 'image_original': image_original}
+        #, 'car_entry': list(car_entry['entry'])}
+
+        mask = car_entry['mask']
+        if mask is not None:
+            mask = np.bitwise_not(mask).astype(np.uint8) * 255  # Background is 255 now.
+            if self.label_transform:
+                mask = Image.fromarray(mask).convert("P")
+                mask = self.label_transform(mask)
+            item['label_map'] = mask
+
+        azimuth = self.carField(car_entry['entry'], 'yaw')
+        if azimuth is not None:
+            azimuth_discr = int(floor(azimuth / 360 * 12)) % 12
+            #azimuth_onehot = np.zeros(12, dtype=np.float32)
+            #azimuth_onehot[azimuth_discr] = 1.
+            item['azimuth'] = azimuth_discr
+
+        pitch = self.carField(car_entry['entry'], 'pitch')
+        if pitch is not None:
+            pitch /= 90.
+            item['pitch'] = pitch
+
+        return item
+
+    def __len__(self):
+        return self.size
+
+
 class TestDataSet(data.Dataset):
     def __init__(self, root, split="train", img_transform=None, label_transform=None, test=True, input_ch=3):
         assert input_ch == 3
@@ -246,13 +307,14 @@ class TestDataSet(data.Dataset):
 
 
 def get_dataset(dataset_name, split, img_transform, label_transform, test, input_ch=3):
-    assert dataset_name in ["gta", "city", "test", "city16", "synthia"]
+    assert dataset_name in ["gta", "city", "test", "city16", "synthia", "citycam"]
 
     name2obj = {
         "gta": GTADataSet,
         "city": CityDataSet,
         "city16": CityDataSet,
         "synthia": SynthiaDataSet,
+        "citycam": CitycamDataSet,
     }
     ##Note fill in the blank below !! "gta....fill the directory over images folder.
     name2root = {
@@ -260,6 +322,7 @@ def get_dataset(dataset_name, split, img_transform, label_transform, test, input
         "city": "/media/cat/datasets/Cityscrapes",  ## ex, ./www.cityscapes-dataset.com/file-handling
         "city16": "",  ## Same as city
         "synthia": "",  ## synthia/RAND_CITYSCAPES",
+        "citycam": "data/citycam",
     }
     dataset_obj = name2obj[dataset_name]
     root = name2root[dataset_name]
@@ -279,6 +342,8 @@ def check_src_tgt_ok(src_dataset_name, tgt_dataset_name):
         raise AssertionError("you must use synthia-city16 pair")
     elif src_dataset_name == "city16" and not tgt_dataset_name == "synthia":
         raise AssertionError("you must use synthia-city16 pair")
+    elif "citycam" in src_dataset_name != "citycam" in tgt_dataset_name:
+        raise AssertionError("Citycam are either both or none of src and tgt")
 
 
 def get_n_class(src_dataset_name):
@@ -286,5 +351,7 @@ def get_n_class(src_dataset_name):
         return 16
     elif src_dataset_name in ["gta", "city", "test"]:
         return 20
+    elif src_dataset_name in ["citycam"]:
+        return 2
     else:
         raise NotImplementedError("You have to define the class of %s dataset" % src_dataset_name)
