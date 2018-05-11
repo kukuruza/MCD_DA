@@ -126,7 +126,8 @@ if args.tgt_dataset == 'citycam':
     import sys
     sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
     from db.lib.dbExport import DatasetWriter
-    writer = DatasetWriter(out_db_file=os.path.join(base_outdir, "predicted.db"), overwrite=True)
+    out_db_file = os.path.abspath(os.path.join(base_outdir, "predicted.db"))
+    writer = DatasetWriter(out_db_file=out_db_file, overwrite=True)
 
 for index, batch in tqdm(enumerate(target_loader)):
     imgs, paths = batch['image'], batch['url']
