@@ -17,7 +17,7 @@ from transform import Scale, ReLabel, ToLabel
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done
 
 parser = argparse.ArgumentParser(description='Adapt tester for validation data')
-parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "synthia", "2d3d"])
+parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "synthia", "2d3d", 'citycam'])
 parser.add_argument('--split', type=str, default='val', help="'val' or 'test')  is used")
 parser.add_argument('trained_checkpoint', type=str, metavar="PTH")
 parser.add_argument('--outdir', type=str, default="test_output",
@@ -82,8 +82,16 @@ if torch.cuda.is_available():
     model.cuda()
 
 model.eval()
+
+if args.tgt_dataset == 'citycam':
+    import sys
+    sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
+    from db.lib.dbExport import DatasetWriter
+    out_db_file = os.path.abspath(os.path.join(base_outdir, "predicted.db"))
+    writer = DatasetWriter(out_db_file=out_db_file, overwrite=True)
+
 for index, batch in tqdm(enumerate(target_loader)):
-    imgs, labels, paths = batch['image'], batch['label_map'], batch['url']
+    imgs, paths = batch['image'], batch['url']
     path = paths[0]
     imgs = Variable(imgs)
     if torch.cuda.is_available():
@@ -107,28 +115,36 @@ for index, batch in tqdm(enumerate(target_loader)):
     else:
         pred = preds[0, :train_args.n_class - 1].data.max(0)[1].cpu()
 
-    img = Image.fromarray(np.uint8(pred.numpy()))
-    img = img.resize(test_img_shape, Image.NEAREST)
-    label_outdir = os.path.join(base_outdir, "label")
-    if index == 0:
-        print ("pred label dir: %s" % label_outdir)
-    mkdir_if_not_exist(label_outdir)
-    label_fn = os.path.join(label_outdir, path.split('/')[-1])
-    img.save(label_fn)
-
-    #  Save visualized predicted pixel labels(pngs)
-    if args.tgt_dataset in ["city16", "synthia"]:
-        info_json_fn = "./dataset/synthia2cityscapes_info.json"
+    mask = Image.fromarray(np.uint8(pred.numpy()))
+    mask = mask.resize(test_img_shape, Image.NEAREST)
+    if args.tgt_dataset == 'citycam':
+        imagenp = batch['image_original'][0].numpy()
+        masknp = np.array(mask) < 0.5  # Background was 1.
+        writer.add_image(imagenp, mask=masknp)
     else:
-        info_json_fn = "./dataset/city_info.json"
+        label_outdir = os.path.join(base_outdir, "label")
+        if index == 0:
+            print ("pred label dir: %s" % label_outdir)
+        mkdir_if_not_exist(label_outdir)
+        label_fn = os.path.join(label_outdir, path.split('/')[-1])
+        mask.save(label_fn)
 
-    # Save visualized predicted pixel labels(pngs)
-    with open(info_json_fn) as f:
-        city_info_dic = json.load(f)
+        #  Save visualized predicted pixel labels(pngs)
+        if args.tgt_dataset in ["city16", "synthia"]:
+            info_json_fn = "./dataset/synthia2cityscapes_info.json"
+        else:
+            info_json_fn = "./dataset/city_info.json"
 
-    palette = np.array(city_info_dic['palette'], dtype=np.uint8)
-    img.putpalette(palette.flatten())
-    vis_outdir = os.path.join(base_outdir, "vis")
-    mkdir_if_not_exist(vis_outdir)
-    vis_fn = os.path.join(vis_outdir, path.split('/')[-1])
-    img.save(vis_fn)
+        # Save visualized predicted pixel labels(pngs)
+        with open(info_json_fn) as f:
+            city_info_dic = json.load(f)
+
+        palette = np.array(city_info_dic['palette'], dtype=np.uint8)
+        mask.putpalette(palette.flatten())
+        vis_outdir = os.path.join(base_outdir, "vis")
+        mkdir_if_not_exist(vis_outdir)
+        vis_fn = os.path.join(vis_outdir, path.split('/')[-1])
+        mask.save(vis_fn)
+
+if args.tgt_dataset == 'citycam':
+    writer.close()

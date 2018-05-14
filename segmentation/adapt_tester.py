@@ -19,8 +19,6 @@ from models.model_util import get_models
 from transform import Scale
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done
 
-logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
-
 parser = argparse.ArgumentParser(description='Adapt tester for validation data')
 parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "citycam"])
 parser.add_argument('trained_checkpoint', type=str, metavar="PTH.TAR")
@@ -45,11 +43,13 @@ parser.add_argument("--use_f2", action="store_true",
                     help='whether you use f2')
 parser.add_argument('--use_ae', action="store_true",
                     help="use ae or not")
-args = parser.parse_args()
+parser.add_argument('--logging', type=int, choices=[10,20,30,40])
 
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
+
+logging.basicConfig(level=args.logging, format='%(levelname)s: %(message)s')
 
 indir, infn = os.path.split(args.trained_checkpoint)
 
@@ -162,11 +162,7 @@ for index, batch in tqdm(enumerate(target_loader)):
     if args.tgt_dataset == 'citycam':
         imagenp = batch['image_original'][0].numpy()
         masknp = np.array(mask) < 0.5  # Background was 1.
-        #print('imagenp', imagenp.dtype, imagenp.shape,
-        #      'masknp', masknp.dtype, masknp.shape)
         writer.add_image(imagenp, mask=masknp)
-        #car_entry = batch['car_entry'][0]
-        #writer.add_car(car_entry)
     else:
         label_outdir = os.path.join(base_outdir, "label")
         if index == 0:
