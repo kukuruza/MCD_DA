@@ -318,8 +318,8 @@ def get_dataset(dataset_name, split, img_transform, label_transform, test, input
     }
     ##Note fill in the blank below !! "gta....fill the directory over images folder.
     name2root = {
-        "gta": "/media/cat/datasets/GTA5",  ## Fill the directory over images folder. put train.txt, val.txt in this folder
-        "city": "/media/cat/datasets/Cityscrapes",  ## ex, ./www.cityscapes-dataset.com/file-handling
+        "gta": "data/gta5",  ## Fill the directory over images folder. put train.txt, val.txt in this folder
+        "city": "data/cityscrapes",  ## ex, ./www.cityscapes-dataset.com/file-handling
         "city16": "",  ## Same as city
         "synthia": "",  ## synthia/RAND_CITYSCAPES",
         "citycam": "data/citycam",
