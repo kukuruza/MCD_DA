@@ -46,8 +46,8 @@ class PairedData(object):
             raise StopIteration()
         else:
             self.iter += 1
-            return {'S': A, 'S_label': A_paths,
-                    'T': B, 'T_label': B_paths}
+            return {'S_image': A, 'S_label': A_paths,
+                    'T_image': B, 'T_label': B_paths}
 
 
 class UnalignedDataLoader():

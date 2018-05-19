@@ -4,6 +4,9 @@ python source_trainer.py citycam --split synthetic-w132-goodtypes --net drn_d_10
 
 python source_tester.py citycam train_output/citycam-synthetic-w132-goodtypes_only_3ch/pth/normal-drn_d_105-1.pth.tar  --test_img_shape 64 64 --split real-w64
 
+python adapt_trainer.py citycam citycam \
+  --src_split synthetic-w132-goodtypes  --tgt_split real-w64  --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
+
 python adapt_tester.py citycam \
   train_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch/pth/MCD-normal-drn_d_105-10.pth.tar \
   --net drn_d_105 --test_img_shape 64 64 --split real-w64 --add_bg_loss

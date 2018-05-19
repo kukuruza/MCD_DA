@@ -3,6 +3,7 @@ import argparse
 import torch
 from solver import Solver
 import os
+import logging
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MCD Implementation')
@@ -45,6 +46,7 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print(args)
 
+logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
 def main():
     # if not args.one_step:

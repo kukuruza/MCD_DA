@@ -15,13 +15,17 @@ from transform import HorizontalFlip, VerticalFlip
 
 
 class ConcatDataset(torch.utils.data.Dataset):
-    def __init__(self, *datasets):
+    def __init__(self, datasets, S_keys=None, T_keys=None):
         self.datasets = datasets
         assert len(self.datasets) == 2, 'For now 2 is enough'
 
         self.indlist2 = np.arange(len(self.datasets[1]))
         np.random.shuffle(self.indlist2)
         self.index2 = -1
+
+        # Use only these keys from datasets.
+        self.S_keys = S_keys
+        self.T_keys = T_keys
 
     def increment_index2(self):
         if self.index2 == len(self.indlist2) - 1:
@@ -32,11 +36,19 @@ class ConcatDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, i):
         self.increment_index2()
-        return (
-            self.datasets[0][i],
-            self.datasets[1][self.indlist2[self.index2]]
-        )
-        #return tuple(d[i] for d in self.datasets)
+        item = {}
+        # Get item from source domain and add it to the new dictionary with  anew key.
+        item_S = self.datasets[0][i]
+        for key in item_S:
+            if self.S_keys is None or key in self.S_keys:
+                item['S_' + key] = item_S[key]
+        # Get item from target domain and add it to the new dictionary with  anew key.
+        item_T = self.datasets[1][self.indlist2[self.index2]]
+        for key in item_T:
+            if self.T_keys is None or key in self.T_keys:
+                item['T_' + key] = item_T[key]
+        logging.debug('ConcatDataset: item.keys(): %s' % str(item.keys()))
+        return item
 
     def __len__(self):
         return min(len(d) for d in self.datasets)
@@ -217,6 +229,12 @@ class CitycamDataSet(data.Dataset):
         from db.lib.dbDataset import CityimagesDataset, CitycarsDataset, CitymatchesDataset
         from db.lib.helperDb import carField
 
+        # Parse info from split.
+        split_list = split.split(',')
+        split = split_list[0]
+        image_constraint = split_list[1] if len(split_list) > 1 else '1'
+        car_constraint = split_list[2] if len(split_list) > 2 else '1'
+
         self.img_transform = img_transform
         self.label_transform = label_transform
         self.carField = carField
@@ -224,6 +242,7 @@ class CitycamDataSet(data.Dataset):
         db_file = os.path.realpath(os.path.join(root, split + '.db'))
         logging.info('CitycamDataSet: db_file is resolved to "%s"' % db_file)
         self.dataset = CitycarsDataset(db_file=db_file,
+                image_constraint=image_constraint, car_constraint=car_constraint,
                 fraction=1., crop_car=False, randomly=False, with_mask=True)
         self.size = len(self.dataset)
 
@@ -252,9 +271,11 @@ class CitycamDataSet(data.Dataset):
         azimuth = self.carField(car_entry['entry'], 'yaw')
         if azimuth is not None:
             azimuth_discr = int(floor(azimuth / 360 * 12)) % 12
+            logging.debug('CitycamDataSet: yaw %1.f transformed into one-hot %s' % (azimuth, str(azimuth_discr)))
             #azimuth_onehot = np.zeros(12, dtype=np.float32)
             #azimuth_onehot[azimuth_discr] = 1.
-            item['azimuth'] = azimuth_discr
+            item['label'] = azimuth_discr
+            item['label_raw'] = azimuth
 
         pitch = self.carField(car_entry['entry'], 'pitch')
         if pitch is not None:

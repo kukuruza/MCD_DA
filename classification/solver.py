@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from model.build_gen import *
-from datasets.dataset_read import dataset_read
 
 
 # Training settings
@@ -26,10 +25,74 @@ class Solver(object):
         else:
             self.scale = False
         print('dataset loading')
-        self.datasets, self.dataset_test = dataset_read(source, target, self.batch_size, scale=self.scale,
-                                                        all_use=self.all_use)
-        print('load finished!')
+        if self.source == 'citycam' or self.target == 'citycam':
+            import sys, os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'segmentation'))
+            from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontalFlip, RandomRotation
+            from PIL import Image
+            from torchvision.transforms import Compose, Normalize, ToTensor
+            from datasets import ConcatDataset, get_dataset, check_src_tgt_ok
+            from models.model_util import get_models, get_optimizer
+
+            train_img_shape = (32, 32)  #  tuple([int(x) for x in args.train_img_shape])
+            img_transform_list = [
+                Scale(train_img_shape, Image.BILINEAR),
+                ToTensor(),
+                Normalize([.485, .456, .406], [.229, .224, .225])
+            ]
+#            if args.augment:
+#                aug_list = [
+#                    RandomRotation(),
+#                    RandomHorizontalFlip(),
+#                    RandomSizedCrop()
+#                ]
+#                img_transform_list = aug_list + img_transform_list
+
+            img_transform = Compose(img_transform_list)
+
+            label_transform = Compose([
+                Scale(train_img_shape, Image.NEAREST),
+                ToLabel(),
+                ReLabel(255, 12) # args.n_class - 1),  # Last Class is "Void" or "Background" class
+            ])
+
+            src_dataset = get_dataset(dataset_name='citycam',
+                    split='synthetic-w132-goodtypes',
+                    img_transform=img_transform, label_transform=label_transform,
+                    test=False, input_ch=3)
+
+            tgt_dataset = get_dataset(dataset_name='citycam',
+                    split='real-w64',
+                    img_transform=img_transform, label_transform=label_transform,
+                    test=False, input_ch=3)
+
+            self.datasets = torch.utils.data.DataLoader(
+                ConcatDataset([src_dataset, tgt_dataset],
+                    S_keys=['image', 'label'], T_keys=['image']
+                    ),
+                batch_size=args.batch_size, shuffle=True,
+                pin_memory=True)
+
+            dataset_test = get_dataset(dataset_name='citycam',
+#                    split='synthetic-w132-goodtypes',
+                    split='real-w64, 1, yaw IS NOT NULL',
+                    img_transform=img_transform, label_transform=label_transform,
+                    test=False, input_ch=3)
+
+            self.dataset_test = torch.utils.data.DataLoader(
+                dataset_test,
+                batch_size=args.batch_size, shuffle=True,
+                pin_memory=True)
+
+        #    self.G, _, _ = get_models(net_name='drn_d_105', input_ch=3,
+        #                                     n_class=12,
+        #                                     is_data_parallel=False)
+        else: 
+            from datasets_dir.dataset_read import dataset_read
+            self.datasets, self.dataset_test = dataset_read(source, target, self.batch_size, scale=self.scale,
+                                                            all_use=self.all_use)
         self.G = Generator(source=source, target=target)
+        print('load finished!')
         self.C1 = Classifier(source=source, target=target)
         self.C2 = Classifier(source=source, target=target)
         if args.eval_only:
@@ -90,8 +153,8 @@ class Solver(object):
         torch.cuda.manual_seed(1)
 
         for batch_idx, data in enumerate(self.datasets):
-            img_t = data['T']
-            img_s = data['S']
+            img_t = data['T_image']
+            img_s = data['S_image']
             label_s = data['S_label']
             if img_s.size()[0] < self.batch_size or img_t.size()[0] < self.batch_size:
                 break
@@ -164,8 +227,8 @@ class Solver(object):
         torch.cuda.manual_seed(1)
 
         for batch_idx, data in enumerate(self.datasets):
-            img_t = data['T']
-            img_s = data['S']
+            img_t = data['T_image']
+            img_s = data['S_image']
             label_s = data['S_label']
             if img_s.size()[0] < self.batch_size or img_t.size()[0] < self.batch_size:
                 break
@@ -176,12 +239,19 @@ class Solver(object):
             img_t = Variable(img_t)
             self.reset_grad()
             feat_s = self.G(img_s)
+            #print ('feat_s.size()', feat_s.size())
+            #feat_s = feat_s.view(-1, 3072)
+#            print ('feat_s.size()', feat_s.size())
+            #assert 0
             output_s1 = self.C1(feat_s)
             output_s2 = self.C2(feat_s)
+#            print ('output_s1.size()', output_s1.size())
+#            print ('label_s.size()', label_s.size())
+#            print (label_s)
             loss_s1 = criterion(output_s1, label_s)
             loss_s2 = criterion(output_s2, label_s)
             loss_s = loss_s1 + loss_s2
-            loss_s.backward(retain_variables=True)
+            loss_s.backward()#retain_variables=True)
             feat_t = self.G(img_t)
             self.C1.set_lambda(1.0)
             self.C2.set_lambda(1.0)
@@ -199,10 +269,10 @@ class Solver(object):
             if batch_idx % self.interval == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss1: {:.6f}\t Loss2: {:.6f}\t  Discrepancy: {:.6f}'.format(
                     epoch, batch_idx, 100,
-                    100. * batch_idx / 70000, loss_s1.data[0], loss_s2.data[0], loss_dis.data[0]))
+                    100. * batch_idx / 70000, loss_s1.data, loss_s2.data, loss_dis.data))
                 if record_file:
                     record = open(record_file, 'a')
-                    record.write('%s %s %s\n' % (loss_dis.data[0], loss_s1.data[0], loss_s2.data[0]))
+                    record.write('%s %s %s\n' % (loss_dis.data, loss_s1.data, loss_s2.data))
                     record.close()
         return batch_idx
 
@@ -216,10 +286,11 @@ class Solver(object):
         correct3 = 0
         size = 0
         for batch_idx, data in enumerate(self.dataset_test):
-            img = data['T']
-            label = data['T_label']
+            img = data['image']
+            label = data['label']
             img, label = img.cuda(), label.long().cuda()
-            img, label = Variable(img, volatile=True), Variable(label)
+            with torch.no_grad():
+                img, label = Variable(img), Variable(label)
             feat = self.G(img)
             output1 = self.C1(feat)
             output2 = self.C2(feat)
@@ -233,6 +304,8 @@ class Solver(object):
             correct2 += pred2.eq(label.data).cpu().sum()
             correct3 += pred_ensemble.eq(label.data).cpu().sum()
             size += k
+            for m in range(10):
+                print ('%1.f' % float(data['label_raw'][m].numpy()), label.cpu().data[m].numpy(), pred1.data[m].cpu().numpy())
         test_loss = test_loss / size
         print(
             '\nTest set: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
