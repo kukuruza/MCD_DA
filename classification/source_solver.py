@@ -59,22 +59,22 @@ class Solver(object):
             src_dataset_test = get_dataset(dataset_name='citycam',
                     split='synthetic-w132-goodtypes',
                     img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3)
+                    test=True, input_ch=3, keys_dict={'image': 'S_image', 'yaw': 'S_label', 'yaw_raw': 'S_label_raw'})
 
             tgt_dataset_test = get_dataset(dataset_name='citycam',
                     split='real-w64, 1, yaw IS NOT NULL',
                     img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3, keys=['image', 'yaw', 'yaw_onehot', 'yaw_raw'])
+                    test=True, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label', 'yaw_raw': 'T_label_raw'})
 
             self.datasets_test = torch.utils.data.DataLoader(
                 ConcatDataset([src_dataset_test, tgt_dataset_test]),
-                batch_size=args.batch_size, shuffle=True,
+                batch_size=args.batch_size, shuffle=False,
                 pin_memory=True)
 
             dataset_train = get_dataset(dataset_name='citycam',
                     split='synthetic-w132-goodtypes',
                     img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3, keys=['image', 'yaw', 'yaw_onehot', 'yaw_raw'])
+                    test=False, input_ch=3, keys_dict={'image': 'S_image', 'yaw': 'S_label', 'yaw_raw': 'S_label_raw'})
 
             self.dataset_train = torch.utils.data.DataLoader(
                 dataset_train,
@@ -147,8 +147,8 @@ class Solver(object):
         torch.cuda.manual_seed(1)
 
         for batch_idx, data in enumerate(self.dataset_train):
-            img_s = data['image']
-            label_s = data['yaw']
+            img_s = data['S_image']
+            label_s = data['S_label']
             if img_s.size()[0] < self.batch_size:
                 break
             img_s = img_s.cuda()
@@ -193,8 +193,8 @@ class Solver(object):
         for prefix in ['S_', 'T_']:
             for batch_idx, data in enumerate(self.datasets_test):
                 img = data[prefix + 'image']
-                label = data[prefix + 'yaw']
-                label_raw = data[prefix + 'yaw_raw']
+                label = data[prefix + 'label']
+#                label_raw = data[prefix + 'label_raw']
                 img, label = img.cuda(), label.long().cuda()
                 with torch.no_grad():
                     img, label = Variable(img), Variable(label)
@@ -208,16 +208,16 @@ class Solver(object):
                 pred_ensemble = output_ensemble.data.max(1)[1]
                 k = label.data.size()[0]
                 label = label.data
-                nextup = (label_raw / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
-                label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
-                        + torch.remainder(label + 1, 12) * nextup
-                correct1 += pred1.eq(label).cpu().sum() + pred1.eq(label_next).cpu().sum()
-                correct2 += pred2.eq(label).cpu().sum() + pred2.eq(label_next).cpu().sum()
-                correct3 += pred_ensemble.eq(label).cpu().sum() + pred_ensemble.eq(label_next).cpu().sum()
+#                nextup = (label_raw / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
+#                label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
+#                        + torch.remainder(label + 1, 12) * nextup
+                correct1 += pred1.eq(label).cpu().sum() #+ pred1.eq(label_next).cpu().sum()
+                correct2 += pred2.eq(label).cpu().sum() #+ pred2.eq(label_next).cpu().sum()
+                correct3 += pred_ensemble.eq(label).cpu().sum() #+ pred_ensemble.eq(label_next).cpu().sum()
                 size += k
             test_loss = test_loss / size
             print(
-                'Test set %s: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
+                'Test set {}: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
                     prefix, test_loss, correct1, size,
                     100. * correct1 / size, correct2, size, 100. * correct2 / size, correct3, size, 100. * correct3 / size))
         if save_model and epoch % self.save_epoch == 0:

@@ -93,7 +93,8 @@ img_transform = Compose([
 label_transform = Compose([Scale(train_img_shape, Image.BILINEAR), ToTensor()])
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
-                          label_transform=label_transform, test=True, input_ch=train_args.input_ch)
+                          label_transform=label_transform, test=True, input_ch=train_args.input_ch,
+                          keys_dict={'image': 'image', 'mask': 'label_map', 'url': 'url'})
 target_loader = data.DataLoader(tgt_dataset, batch_size=1, pin_memory=True, shuffle=False)
 
 try:

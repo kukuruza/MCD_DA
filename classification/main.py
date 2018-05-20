@@ -60,7 +60,7 @@ def main():
     solver = Solver(args, source=args.source, target=args.target, learning_rate=args.lr, batch_size=args.batch_size,
                     optimizer=args.optimizer, num_k=args.num_k, all_use=args.all_use,
                     checkpoint_dir=args.checkpoint_dir,
-                    save_epoch=args.save_epoch, interval=10)
+                    save_epoch=args.save_epoch, interval=100)
     record_num = 0
     if args.source == 'usps' or args.target == 'usps':
 

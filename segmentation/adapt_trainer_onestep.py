@@ -126,10 +126,12 @@ label_transform = Compose([
 ])
 
 src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.src_split, img_transform=img_transform,
-                          label_transform=label_transform, test=False, input_ch=args.input_ch)
+                          label_transform=label_transform, test=False, input_ch=args.input_ch,
+                          keys_dict={'image': 'S_image', 'mask': 'S_label_map'})
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.tgt_split, img_transform=img_transform,
-                          label_transform=label_transform, test=False, input_ch=args.input_ch)
+                          label_transform=label_transform, test=False, input_ch=args.input_ch,
+                          keys_dict={'image': 'T_image'})
 
 train_loader = torch.utils.data.DataLoader(
     ConcatDataset(

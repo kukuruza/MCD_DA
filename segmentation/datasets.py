@@ -36,11 +36,11 @@ class ConcatDataset(torch.utils.data.Dataset):
         # Get item from source domain and add it to the new dictionary with  anew key.
         item_S = self.datasets[0][i]
         for key in item_S:
-            item['S_' + key] = item_S[key]
+            item[key] = item_S[key]
         # Get item from target domain and add it to the new dictionary with  anew key.
         item_T = self.datasets[1][self.indlist2[self.index2]]
         for key in item_T:
-            item['T_' + key] = item_T[key]
+            item[key] = item_T[key]
         logging.debug('ConcatDataset: item.keys(): %s' % str(item.keys()))
         return item
 
@@ -232,7 +232,9 @@ class CitycamDataSet(data.Dataset):
         return onehot
 
     def __init__(self, root, split, img_transform=None, label_transform=None,
-                test=False, input_ch=3, keys=None):
+                test=False, input_ch=3, 
+                keys_dict={}  # Necessary keys and their names for gititem.
+                ):
         import os, sys
         sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
         from db.lib.dbDataset import CityimagesDataset, CitycarsDataset, CitymatchesDataset
@@ -255,7 +257,7 @@ class CitycamDataSet(data.Dataset):
                 fraction=1., crop_car=False, randomly=False, with_mask=True)
         self.size = len(self.dataset)
 
-        self.keys = keys
+        self.keys_dict = keys_dict
 
     def __getitem__(self, index):
         car_entry = self.dataset[index]
@@ -268,35 +270,38 @@ class CitycamDataSet(data.Dataset):
             image = self.img_transform(image)
 
         #print (car_entry['entry'])
-        item = {'image': image, 'url': imagefile, 'image_original': image_original}
-        #, 'car_entry': list(car_entry['entry'])}
+        item = {}
+        if 'image' in self.keys_dict:
+          item[self.keys_dict['image']] = image
+        if 'url' in self.keys_dict:
+          item[self.keys_dict['url']] = imagefile
+        if 'image_original' in self.keys_dict:
+          item[self.keys_dict['image_original']] = image_original
 
         mask = car_entry['mask']
-        if mask is not None:
+        if mask is not None and 'mask' in self.keys_dict:
             mask = np.bitwise_not(mask).astype(np.uint8) * 255  # Background is 255 now.
             if self.label_transform:
                 mask = Image.fromarray(mask).convert("P")
                 mask = self.label_transform(mask)
-            item['label_map'] = mask
+            item[self.keys_dict['mask']] = mask
 
         yaw = self.carField(car_entry['entry'], 'yaw')
         if yaw is not None:
             yaw_discr = int(floor(yaw / 360 * 12)) % 12
             logging.debug('CitycamDataSet: yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
-            #yaw_onehot = np.zeros(12, dtype=np.float32)
-            #yaw_onehot[yaw_discr] = 1.
-            item['yaw'] = yaw_discr
-            item['yaw_onehot'] = self._onehot_yaw(yaw)
-            item['yaw_raw'] = yaw
+            if 'yaw' in self.keys_dict:
+              item[self.keys_dict['yaw']] = yaw_discr
+            if 'yaw_onehot' in self.keys_dict:
+              item[self.keys_dict['yaw_onehot']] = self._onehot_yaw(yaw)
+            if 'yaw_raw' in self.keys_dict:
+              item[self.keys_dict['yaw_raw']] = yaw
 
         pitch = self.carField(car_entry['entry'], 'pitch')
-        if pitch is not None:
+        if pitch is not None and 'pitch' in self.keys_dict:
             pitch /= 90.
-            item['pitch'] = pitch
+            item[self.keys_dict['pitch']] = pitch
 
-        for key in item.keys():
-            if self.keys is not None and key not in self.keys:
-                del item[key]
         return item
 
     def __len__(self):
