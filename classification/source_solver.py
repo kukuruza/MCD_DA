@@ -34,7 +34,7 @@ class Solver(object):
             from datasets import ConcatDataset, get_dataset, check_src_tgt_ok
             from models.model_util import get_models, get_optimizer
 
-            train_img_shape = (32, 32)  #  tuple([int(x) for x in args.train_img_shape])
+            train_img_shape = (64, 64)  #  tuple([int(x) for x in args.train_img_shape])
             img_transform_list = [
                 Scale(train_img_shape, Image.BILINEAR),
                 ToTensor(),
@@ -83,7 +83,7 @@ class Solver(object):
 
         else: 
             from datasets_dir.dataset_read import dataset_read
-            self.datasets_test, self.dataset_train = dataset_read(source, target, self.batch_size, scale=self.scale,
+            self.datasets_test, self.dataset_train = dataset_read(target, source, self.batch_size, scale=self.scale,
                                                             all_use=self.all_use)
         self.G = Generator(source=source, target=target)
         print('load finished!')

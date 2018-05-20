@@ -34,7 +34,7 @@ class Solver(object):
             from datasets import ConcatDataset, get_dataset, check_src_tgt_ok
             from models.model_util import get_models, get_optimizer
 
-            train_img_shape = (32, 32)  #  tuple([int(x) for x in args.train_img_shape])
+            train_img_shape = (64, 64)  #  tuple([int(x) for x in args.train_img_shape])
             img_transform_list = [
                 Scale(train_img_shape, Image.BILINEAR),
                 ToTensor(),
