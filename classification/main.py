@@ -1,12 +1,13 @@
 from __future__ import print_function
 import argparse
 import torch
-from solver import Solver
 import os
 import logging
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MCD Implementation')
+parser.add_argument('--no_adaptation', action='store_true',
+                    help='simply train on source, test on source and target.')
 parser.add_argument('--all_use', type=str, default='no', metavar='N',
                     help='use all training data? in usps adaptation')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',
@@ -46,6 +47,11 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 print(args)
 
+if args.no_adaptation:
+    from source_solver import Solver
+else:
+    from solver import Solver
+
 logging.basicConfig(level=20, format='%(levelname)s: %(message)s')
 
 def main():
@@ -54,7 +60,7 @@ def main():
     solver = Solver(args, source=args.source, target=args.target, learning_rate=args.lr, batch_size=args.batch_size,
                     optimizer=args.optimizer, num_k=args.num_k, all_use=args.all_use,
                     checkpoint_dir=args.checkpoint_dir,
-                    save_epoch=args.save_epoch)
+                    save_epoch=args.save_epoch, interval=10)
     record_num = 0
     if args.source == 'usps' or args.target == 'usps':
 

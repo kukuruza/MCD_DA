@@ -56,37 +56,35 @@ class Solver(object):
                 ReLabel(255, 12) # args.n_class - 1),  # Last Class is "Void" or "Background" class
             ])
 
-            src_dataset = get_dataset(dataset_name='citycam',
+            src_dataset_test = get_dataset(dataset_name='citycam',
                     split='synthetic-w132-goodtypes',
                     img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3, keys=['image', 'yaw', 'yaw_onehot'])
+                    test=False, input_ch=3)
 
-            tgt_dataset = get_dataset(dataset_name='citycam',
-                    split='real-w64',
-                    img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3, keys=['image'])
-
-            self.datasets = torch.utils.data.DataLoader(
-                ConcatDataset([src_dataset, tgt_dataset]),
-                batch_size=args.batch_size, shuffle=True,
-                pin_memory=True)
-
-            dataset_test = get_dataset(dataset_name='citycam',
-#                    split='synthetic-w132-goodtypes',
+            tgt_dataset_test = get_dataset(dataset_name='citycam',
                     split='real-w64, 1, yaw IS NOT NULL',
                     img_transform=img_transform, label_transform=label_transform,
                     test=False, input_ch=3, keys=['image', 'yaw', 'yaw_onehot', 'yaw_raw'])
 
-            self.dataset_test = torch.utils.data.DataLoader(
-                dataset_test,
+            self.datasets_test = torch.utils.data.DataLoader(
+                ConcatDataset([src_dataset_test, tgt_dataset_test]),
+                batch_size=args.batch_size, shuffle=True,
+                pin_memory=True)
+
+            dataset_train = get_dataset(dataset_name='citycam',
+                    split='synthetic-w132-goodtypes',
+                    img_transform=img_transform, label_transform=label_transform,
+                    test=False, input_ch=3, keys=['image', 'yaw', 'yaw_onehot', 'yaw_raw'])
+
+            self.dataset_train = torch.utils.data.DataLoader(
+                dataset_train,
                 batch_size=args.batch_size, shuffle=True,
                 pin_memory=True)
 
         else: 
             from datasets_dir.dataset_read import dataset_read
-            self.datasets, self.dataset_test = dataset_read(source, target, self.batch_size, scale=self.scale,
+            self.datasets_test, self.dataset_train = dataset_read(source, target, self.batch_size, scale=self.scale,
                                                             all_use=self.all_use)
-
         self.G = Generator(source=source, target=target)
         print('load finished!')
         self.C1 = Classifier(source=source, target=target)
@@ -141,80 +139,6 @@ class Solver(object):
     def discrepancy(self, out1, out2):
         return torch.mean(torch.abs(F.softmax(out1) - F.softmax(out2)))
 
-    def train(self, epoch, record_file=None):
-        criterion = nn.CrossEntropyLoss().cuda()
-        self.G.train()
-        self.C1.train()
-        self.C2.train()
-        torch.cuda.manual_seed(1)
-
-        for batch_idx, data in enumerate(self.datasets):
-            img_t = data['T_image']
-            img_s = data['S_image']
-            label_s = data['S_yaw']
-            if img_s.size()[0] < self.batch_size or img_t.size()[0] < self.batch_size:
-                break
-            img_s = img_s.cuda()
-            img_t = img_t.cuda()
-            imgs = Variable(torch.cat((img_s, \
-                                       img_t), 0))
-            label_s = Variable(label_s.long().cuda())
-
-            img_s = Variable(img_s)
-            img_t = Variable(img_t)
-            self.reset_grad()
-            feat_s = self.G(img_s)
-            output_s1 = self.C1(feat_s)
-            output_s2 = self.C2(feat_s)
-
-            loss_s1 = criterion(output_s1, label_s)
-            loss_s2 = criterion(output_s2, label_s)
-            loss_s = loss_s1 + loss_s2
-            loss_s.backward()
-            self.opt_g.step()
-            self.opt_c1.step()
-            self.opt_c2.step()
-            self.reset_grad()
-
-            feat_s = self.G(img_s)
-            output_s1 = self.C1(feat_s)
-            output_s2 = self.C2(feat_s)
-            feat_t = self.G(img_t)
-            output_t1 = self.C1(feat_t)
-            output_t2 = self.C2(feat_t)
-
-            loss_s1 = criterion(output_s1, label_s)
-            loss_s2 = criterion(output_s2, label_s)
-            loss_s = loss_s1 + loss_s2
-            loss_dis = self.discrepancy(output_t1, output_t2)
-            loss = loss_s - loss_dis
-            loss.backward()
-            self.opt_c1.step()
-            self.opt_c2.step()
-            self.reset_grad()
-
-            for i in xrange(self.num_k):
-                #
-                feat_t = self.G(img_t)
-                output_t1 = self.C1(feat_t)
-                output_t2 = self.C2(feat_t)
-                loss_dis = self.discrepancy(output_t1, output_t2)
-                loss_dis.backward()
-                self.opt_g.step()
-                self.reset_grad()
-            if batch_idx > 500:
-                return batch_idx
-
-            if batch_idx % self.interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss1: {:.6f}\t Loss2: {:.6f}\t  Discrepancy: {:.6f}'.format(
-                    epoch, batch_idx, 100,
-                    100. * batch_idx / 70000, loss_s1.item(), loss_s2.item(), loss_dis.item()))
-                if record_file:
-                    record = open(record_file, 'a')
-                    record.write('%s %s %s\n' % (loss_dis.item(), loss_s1.item(), loss_s2.item()))
-                    record.close()
-        return batch_idx
-
     def train_onestep(self, epoch, record_file=None):
         criterion = nn.CrossEntropyLoss().cuda()
         self.G.train()
@@ -222,39 +146,24 @@ class Solver(object):
         self.C2.train()
         torch.cuda.manual_seed(1)
 
-        for batch_idx, data in enumerate(self.datasets):
-            img_t = data['T_image']
-            img_s = data['S_image']
-            label_s = data['S_yaw']
-            if img_s.size()[0] < self.batch_size or img_t.size()[0] < self.batch_size:
+        for batch_idx, data in enumerate(self.dataset_train):
+            img_s = data['image']
+            label_s = data['yaw']
+            if img_s.size()[0] < self.batch_size:
                 break
             img_s = img_s.cuda()
-            img_t = img_t.cuda()
             label_s = Variable(label_s.long().cuda())
             img_s = Variable(img_s)
-            img_t = Variable(img_t)
             self.reset_grad()
             feat_s = self.G(img_s)
-            #print ('feat_s.size()', feat_s.size())
-            #feat_s = feat_s.view(-1, 3072)
-#            print ('feat_s.size()', feat_s.size())
-            #assert 0
             output_s1 = self.C1(feat_s)
             output_s2 = self.C2(feat_s)
-#            print ('output_s1.size()', output_s1.size())
-#            print ('label_s.size()', label_s.size())
-#            print (label_s)
             loss_s1 = criterion(output_s1, label_s)
             loss_s2 = criterion(output_s2, label_s)
             loss_s = loss_s1 + loss_s2
             loss_s.backward()#retain_variables=True)
-            feat_t = self.G(img_t)
             self.C1.set_lambda(1.0)
             self.C2.set_lambda(1.0)
-            output_t1 = self.C1(feat_t, reverse=True)
-            output_t2 = self.C2(feat_t, reverse=True)
-            loss_dis = -self.discrepancy(output_t1, output_t2)
-            #loss_dis.backward()
             self.opt_c1.step()
             self.opt_c2.step()
             self.opt_g.step()
@@ -263,12 +172,12 @@ class Solver(object):
                 return batch_idx
 
             if batch_idx % self.interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss1: {:.6f}\t Loss2: {:.6f}\t  Discrepancy: {:.6f}'.format(
+                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss1: {:.6f}\t Loss2: {:.6f}'.format(
                     epoch, batch_idx, 100,
-                    100. * batch_idx / 70000, loss_s1.data, loss_s2.data, loss_dis.data))
+                    100. * batch_idx / 70000, loss_s1.data, loss_s2.data))
                 if record_file:
                     record = open(record_file, 'a')
-                    record.write('%s %s %s\n' % (loss_dis.data, loss_s1.data, loss_s2.data))
+                    record.write('%s %s\n' % (loss_s1.data, loss_s2.data))
                     record.close()
         return batch_idx
 
@@ -281,37 +190,36 @@ class Solver(object):
         correct2 = 0
         correct3 = 0
         size = 0
-        for batch_idx, data in enumerate(self.dataset_test):
-            img = data['image']
-            label = data['yaw']
-            label_raw = data['yaw_raw']
-            img, label = img.cuda(), label.long().cuda()
-            with torch.no_grad():
-                img, label = Variable(img), Variable(label)
-            feat = self.G(img)
-            output1 = self.C1(feat)
-            output2 = self.C2(feat)
-            test_loss += F.nll_loss(output1, label).data[0]
-            output_ensemble = output1 + output2
-            pred1 = output1.data.max(1)[1]
-            pred2 = output2.data.max(1)[1]
-            pred_ensemble = output_ensemble.data.max(1)[1]
-            k = label.data.size()[0]
-            label = label.data
-            nextup = (label_raw / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
-            label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
-                       + torch.remainder(label + 1, 12) * nextup
-            correct1 += pred1.eq(label).cpu().sum() + pred1.eq(label_next).cpu().sum()
-            correct2 += pred2.eq(label).cpu().sum() + pred2.eq(label_next).cpu().sum()
-            correct3 += pred_ensemble.eq(label).cpu().sum() + pred_ensemble.eq(label_next).cpu().sum()
-            size += k
-            for m in range(10):
-                print ('%1.f' % float(data['yaw_raw'][m].numpy()), label.cpu()[m].numpy(), pred1.data[m].cpu().numpy())
-        test_loss = test_loss / size
-        print(
-            '\nTest set: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
-                test_loss, correct1, size,
-                100. * correct1 / size, correct2, size, 100. * correct2 / size, correct3, size, 100. * correct3 / size))
+        for prefix in ['S_', 'T_']:
+            for batch_idx, data in enumerate(self.datasets_test):
+                img = data[prefix + 'image']
+                label = data[prefix + 'yaw']
+                label_raw = data[prefix + 'yaw_raw']
+                img, label = img.cuda(), label.long().cuda()
+                with torch.no_grad():
+                    img, label = Variable(img), Variable(label)
+                feat = self.G(img)
+                output1 = self.C1(feat)
+                output2 = self.C2(feat)
+                test_loss += F.nll_loss(output1, label).data
+                output_ensemble = output1 + output2
+                pred1 = output1.data.max(1)[1]
+                pred2 = output2.data.max(1)[1]
+                pred_ensemble = output_ensemble.data.max(1)[1]
+                k = label.data.size()[0]
+                label = label.data
+                nextup = (label_raw / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
+                label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
+                        + torch.remainder(label + 1, 12) * nextup
+                correct1 += pred1.eq(label).cpu().sum() + pred1.eq(label_next).cpu().sum()
+                correct2 += pred2.eq(label).cpu().sum() + pred2.eq(label_next).cpu().sum()
+                correct3 += pred_ensemble.eq(label).cpu().sum() + pred_ensemble.eq(label_next).cpu().sum()
+                size += k
+            test_loss = test_loss / size
+            print(
+                'Test set %s: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
+                    prefix, test_loss, correct1, size,
+                    100. * correct1 / size, correct2, size, 100. * correct2 / size, correct3, size, 100. * correct3 / size))
         if save_model and epoch % self.save_epoch == 0:
             torch.save(self.G,
                        '%s/%s_to_%s_model_epoch%s_G.pt' % (self.checkpoint_dir, self.source, self.target, epoch))

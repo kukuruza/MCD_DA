@@ -16,7 +16,6 @@ def return_dataset(data, scale=False, usps=False, all_use='no'):
     if data == 'mnist':
         train_image, train_label, \
         test_image, test_label = load_mnist(scale=scale, usps=usps, all_use=all_use)
-        print(train_image.shape)
     if data == 'usps':
         train_image, train_label, \
         test_image, test_label = load_usps(all_use=all_use)

@@ -15,17 +15,13 @@ from transform import HorizontalFlip, VerticalFlip
 
 
 class ConcatDataset(torch.utils.data.Dataset):
-    def __init__(self, datasets, S_keys=None, T_keys=None):
+    def __init__(self, datasets):
         self.datasets = datasets
         assert len(self.datasets) == 2, 'For now 2 is enough'
 
         self.indlist2 = np.arange(len(self.datasets[1]))
         np.random.shuffle(self.indlist2)
         self.index2 = -1
-
-        # Use only these keys from datasets.
-        self.S_keys = S_keys
-        self.T_keys = T_keys
 
     def increment_index2(self):
         if self.index2 == len(self.indlist2) - 1:
@@ -40,13 +36,11 @@ class ConcatDataset(torch.utils.data.Dataset):
         # Get item from source domain and add it to the new dictionary with  anew key.
         item_S = self.datasets[0][i]
         for key in item_S:
-            if self.S_keys is None or key in self.S_keys:
-                item['S_' + key] = item_S[key]
+            item['S_' + key] = item_S[key]
         # Get item from target domain and add it to the new dictionary with  anew key.
         item_T = self.datasets[1][self.indlist2[self.index2]]
         for key in item_T:
-            if self.T_keys is None or key in self.T_keys:
-                item['T_' + key] = item_T[key]
+            item['T_' + key] = item_T[key]
         logging.debug('ConcatDataset: item.keys(): %s' % str(item.keys()))
         return item
 
@@ -222,8 +216,23 @@ class SynthiaDataSet(data.Dataset):
 
 class CitycamDataSet(data.Dataset):
 
+    def _onehot_yaw(self, yaw):
+        assert yaw >= 0 and yaw < 360., yaw
+        yaw = yaw / 360. * 12.
+
+        onehot = np.zeros((12,), dtype=float)
+        integral = int(floor(yaw))
+        fraction = yaw - floor(yaw)
+        if fraction < 0.5:
+            onehot[integral] = 1. - fraction
+            onehot[(integral - 1) % 12] = fraction
+        else:
+            onehot[integral] = fraction
+            onehot[(integral + 1) % 12] = 1. - fraction
+        return onehot
+
     def __init__(self, root, split, img_transform=None, label_transform=None,
-                test=False, input_ch=3):
+                test=False, input_ch=3, keys=None):
         import os, sys
         sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
         from db.lib.dbDataset import CityimagesDataset, CitycarsDataset, CitymatchesDataset
@@ -245,6 +254,8 @@ class CitycamDataSet(data.Dataset):
                 image_constraint=image_constraint, car_constraint=car_constraint,
                 fraction=1., crop_car=False, randomly=False, with_mask=True)
         self.size = len(self.dataset)
+
+        self.keys = keys
 
     def __getitem__(self, index):
         car_entry = self.dataset[index]
@@ -268,20 +279,24 @@ class CitycamDataSet(data.Dataset):
                 mask = self.label_transform(mask)
             item['label_map'] = mask
 
-        azimuth = self.carField(car_entry['entry'], 'yaw')
-        if azimuth is not None:
-            azimuth_discr = int(floor(azimuth / 360 * 12)) % 12
-            logging.debug('CitycamDataSet: yaw %1.f transformed into one-hot %s' % (azimuth, str(azimuth_discr)))
-            #azimuth_onehot = np.zeros(12, dtype=np.float32)
-            #azimuth_onehot[azimuth_discr] = 1.
-            item['label'] = azimuth_discr
-            item['label_raw'] = azimuth
+        yaw = self.carField(car_entry['entry'], 'yaw')
+        if yaw is not None:
+            yaw_discr = int(floor(yaw / 360 * 12)) % 12
+            logging.debug('CitycamDataSet: yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
+            #yaw_onehot = np.zeros(12, dtype=np.float32)
+            #yaw_onehot[yaw_discr] = 1.
+            item['yaw'] = yaw_discr
+            item['yaw_onehot'] = self._onehot_yaw(yaw)
+            item['yaw_raw'] = yaw
 
         pitch = self.carField(car_entry['entry'], 'pitch')
         if pitch is not None:
             pitch /= 90.
             item['pitch'] = pitch
 
+        for key in item.keys():
+            if self.keys is not None and key not in self.keys:
+                del item[key]
         return item
 
     def __len__(self):
@@ -327,7 +342,7 @@ class TestDataSet(data.Dataset):
         return {'image': img, 'label_map': img}
 
 
-def get_dataset(dataset_name, split, img_transform, label_transform, test, input_ch=3):
+def get_dataset(dataset_name, split, img_transform, label_transform, test, input_ch, **kwargs):
     assert dataset_name in ["gta", "city", "test", "city16", "synthia", "citycam"]
 
     name2obj = {
@@ -353,7 +368,7 @@ def get_dataset(dataset_name, split, img_transform, label_transform, test, input
                            test=test, input_ch=input_ch, label_type="label16")
     else:
         dataset = dataset_obj(root=root, split=split, img_transform=img_transform, label_transform=label_transform,
-                           test=test, input_ch=input_ch)
+                           test=test, input_ch=input_ch, **kwargs)
     print ('Initialized dataset "%s" with split "%s" and size %d' % (dataset_name, split, len(dataset)))
     return dataset
 

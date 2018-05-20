@@ -158,9 +158,9 @@ for epoch in range(start_epoch, args.epochs):
     d_loss_per_epoch = 0
     c_loss_per_epoch = 0
     interpolate = max(0, min(1 - epoch / 20., 0.8))
-    for ind, (source, target) in tqdm.tqdm(enumerate(train_loader)):
-        src_imgs, src_lbls = Variable(source['image']), Variable(source['label_map'])
-        tgt_imgs = Variable(target['image'])
+    for ind, batch in tqdm.tqdm(enumerate(train_loader)):
+        src_imgs, src_lbls = Variable(batch['S_image']), Variable(batch['S_label_map'])
+        tgt_imgs = Variable(batch['T_image'])
 
         if torch.cuda.is_available():
             src_imgs, src_lbls, tgt_imgs = src_imgs.cuda(), src_lbls.cuda(), tgt_imgs.cuda()
