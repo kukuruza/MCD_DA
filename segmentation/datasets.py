@@ -40,6 +40,7 @@ class ConcatDataset(torch.utils.data.Dataset):
         # Get item from target domain and add it to the new dictionary with  anew key.
         item_T = self.datasets[1][self.indlist2[self.index2]]
         for key in item_T:
+            assert key not in item_S, (key, item_S.keys())
             item[key] = item_T[key]
         logging.debug('ConcatDataset: item.keys(): %s' % str(item.keys()))
         return item

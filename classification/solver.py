@@ -76,7 +76,7 @@ class Solver(object):
 #                    split='synthetic-w132-goodtypes',
                     split='real-w64, 1, yaw IS NOT NULL',
                     img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label'})
+                    test=False, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label', 'yaw_raw': 'T_label_raw'})
 
             self.dataset_test = torch.utils.data.DataLoader(
                 dataset_test,
@@ -278,7 +278,6 @@ class Solver(object):
         for batch_idx, data in enumerate(self.dataset_test):
             img = data['T_image']
             label = data['T_label']
-#            label_raw = data['yaw_raw']
             img, label = img.cuda(), label.long().cuda()
             with torch.no_grad():
                 img, label = Variable(img), Variable(label)
@@ -292,12 +291,16 @@ class Solver(object):
             pred_ensemble = output_ensemble.data.max(1)[1]
             k = label.data.size()[0]
             label = label.data
-#            nextup = (label_raw / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
-#            label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
-#                       + torch.remainder(label + 1, 12) * nextup
-            correct1 += pred1.eq(label).cpu().sum() #+ pred1.eq(label_next).cpu().sum()
-            correct2 += pred2.eq(label).cpu().sum() #+ pred2.eq(label_next).cpu().sum()
-            correct3 += pred_ensemble.eq(label).cpu().sum() #+ pred_ensemble.eq(label_next).cpu().sum()
+            correct1 += pred1.eq(label).cpu().sum()
+            correct2 += pred2.eq(label).cpu().sum()
+            correct3 += pred_ensemble.eq(label).cpu().sum() 
+            if self.source == 'citycam':
+                nextup = (data['T_label_raw'] / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
+                label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
+                           + torch.remainder(label + 1, 12) * nextup
+                correct1 += pred1.eq(label_next).cpu().sum()
+                correct2 += pred2.eq(label_next).cpu().sum()
+                correct3 += pred_ensemble.eq(label_next).cpu().sum()
             size += k
 #            for m in range(10):
 #                print ('%1.f' % float(data['yaw_raw'][m].numpy()), label.cpu()[m].numpy(), pred1.data[m].cpu().numpy())
