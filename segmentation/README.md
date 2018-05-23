@@ -7,9 +7,20 @@ python source_tester.py citycam train_output/citycam-synthetic-w132-goodtypes_on
 python adapt_trainer.py citycam citycam \
   --src_split synthetic-w132-goodtypes  --tgt_split real-w64  --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
 
+epoch=10
+
 python adapt_tester.py citycam \
-  train_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch/pth/MCD-normal-drn_d_105-10.pth.tar \
-  --net drn_d_105 --test_img_shape 64 64 --split real-w64 --add_bg_loss
+  train_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch/pth/MCD-normal-drn_d_105-${epoch}.pth.tar \
+  --net drn_d_105 --test_img_shape 64 64 --split "real-w64-wmask" --add_bg_loss
+
+# Full path is important in '-i' argument.
+modify \
+  -i /home/etoropov/src/MCD_DA/segmentation/test_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch---citycam-real-w64-wmask/MCD-normal-drn_d_105-${epoch}.tar/predicted.db \
+  --relpath test_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch---citycam-real-w64-wmask/MCD-normal-drn_d_105-${epoch}.tar \
+  evaluateSegmentation --gt_db_file data/patches/Oct10-real/w55-goodtypes-e04-filt-onlywmask.db \
+    --image_constraint "maskfile IS NOT NULL" \
+    --out_dir test_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch---citycam-real-w64-wmask/eval \
+    --out_prefix ${epoch}_
 ```
 
 

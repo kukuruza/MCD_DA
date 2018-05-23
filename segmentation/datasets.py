@@ -253,6 +253,7 @@ class CitycamDataSet(data.Dataset):
 
         db_file = os.path.realpath(os.path.join(root, split + '.db'))
         logging.info('CitycamDataSet: db_file is resolved to "%s"' % db_file)
+        assert os.path.exists(db_file)
         self.dataset = CitycarsDataset(db_file=db_file,
                 image_constraint=image_constraint, car_constraint=car_constraint,
                 fraction=1., crop_car=False, randomly=False, with_mask=True)

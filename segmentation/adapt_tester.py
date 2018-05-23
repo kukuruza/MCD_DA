@@ -43,7 +43,7 @@ parser.add_argument("--use_f2", action="store_true",
                     help='whether you use f2')
 parser.add_argument('--use_ae', action="store_true",
                     help="use ae or not")
-parser.add_argument('--logging', type=int, choices=[10,20,30,40])
+parser.add_argument('--logging', type=int, choices=[10,20,30,40], default=20)
 
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
@@ -94,7 +94,7 @@ label_transform = Compose([Scale(train_img_shape, Image.BILINEAR), ToTensor()])
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=True, input_ch=train_args.input_ch,
-                          keys_dict={'image': 'image', 'mask': 'label_map', 'url': 'url'})
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
 target_loader = data.DataLoader(tgt_dataset, batch_size=1, pin_memory=True, shuffle=False)
 
 try:
