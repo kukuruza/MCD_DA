@@ -1,9 +1,25 @@
-## For citycam
+## For citycam adaptation.
 ```
 python source_trainer.py citycam --split synthetic-w132-goodtypes --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
 
-python source_tester.py citycam train_output/citycam-synthetic-w132-goodtypes_only_3ch/pth/normal-drn_d_105-1.pth.tar  --test_img_shape 64 64 --split real-w64
+epoch=2
 
+python source_tester.py \
+  citycam train_output/citycam-synthetic-w132-goodtypes_only_3ch/pth/normal-drn_d_105-${epoch}.pth.tar \
+  --test_img_shape 64 64 --split "real-w64-wmask"
+
+modify \
+  -i /home/etoropov/src/MCD_DA/segmentation/test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-real-w64-wmask/normal-drn_d_105-${epoch}.tar/predicted.db \
+  --relpath /home/etoropov/src/MCD_DA/segmentation/test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-real-w64-wmask/normal-drn_d_105-${epoch}.tar \
+  evaluateSegmentation --gt_db_file data/patches/Oct10-real/w55-goodtypes-e04-filt-onlywmask.db \
+    --image_constraint "maskfile IS NOT NULL" \
+    --out_dir test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-real-w64-wmask/eval \
+    --out_prefix ${epoch}_
+
+```
+
+# For citycam source training.
+```
 python adapt_trainer.py citycam citycam \
   --src_split synthetic-w132-goodtypes  --tgt_split real-w64  --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
 

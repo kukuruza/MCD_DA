@@ -74,7 +74,8 @@ label_transform = Compose([
 ])
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
-                          label_transform=label_transform, test=True, input_ch=train_args.input_ch)
+                          label_transform=label_transform, test=True, input_ch=train_args.input_ch,
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
 
 target_loader = data.DataLoader(tgt_dataset, batch_size=1, pin_memory=True)
 
@@ -91,6 +92,7 @@ if args.tgt_dataset == 'citycam':
     writer = DatasetWriter(out_db_file=out_db_file, overwrite=True)
 
 for index, batch in tqdm(enumerate(target_loader)):
+    assert 'image' in batch and 'url' in batch, batch.keys()
     imgs, paths = batch['image'], batch['url']
     path = paths[0]
     imgs = Variable(imgs)
