@@ -1,6 +1,7 @@
 from __future__ import division
 
 import os
+import logging
 
 import torch
 from PIL import Image
@@ -19,9 +20,12 @@ from util import check_if_done, save_checkpoint, adjust_learning_rate, emphasize
 from util import mkdir_if_not_exist, save_dic_to_json
 
 parser = get_src_only_training_parser()
+parser.add_argument('--logging', type=int, choices=[10,20,30,40], default=20)
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
+
+logging.basicConfig(level=args.logging, format='%(levelname)s: %(message)s')
 
 if args.resume:
     print("=> loading checkpoint '{}'".format(args.resume))

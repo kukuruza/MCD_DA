@@ -1,4 +1,4 @@
-## For citycam adaptation.
+## For citycam source training.
 ```
 python source_trainer.py citycam --split synthetic-w132-goodtypes --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
 
@@ -15,10 +15,10 @@ modify \
     --image_constraint "maskfile IS NOT NULL" \
     --out_dir test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-real-w64-wmask/eval \
     --out_prefix ${epoch}_
-
 ```
 
-# For citycam source training.
+## For citycam adaptation.
+
 ```
 python adapt_trainer.py citycam citycam \
   --src_split synthetic-w132-goodtypes  --tgt_split real-w64  --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
