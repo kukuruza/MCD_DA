@@ -34,6 +34,7 @@ class SegmentorSource:
     pprint(train_args.__dict__, indent=4)
     print ("-" * 50)
     self.input_ch = train_args.input_ch
+    assert self.input_ch == 3, self.input_ch
     self.image_shape = tuple([int(x) for x in train_args.train_img_shape])
     print("=> loaded checkpoint '{}'".format(args.trained_checkpoint))
 
