@@ -101,7 +101,8 @@ label_transform = Compose([
 ])
 
 src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.split, img_transform=img_transform,
-                          label_transform=label_transform, test=False, input_ch=args.input_ch)
+                          label_transform=label_transform, test=False, input_ch=args.input_ch,
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
 
 kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
 train_loader = torch.utils.data.DataLoader(src_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)

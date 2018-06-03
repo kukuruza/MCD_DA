@@ -1,4 +1,4 @@
-## For citycam source training.
+## For citycam source training on synthetic, testing on real.
 ```
 python source_trainer.py citycam --split synthetic-w132-goodtypes --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss
 
@@ -15,6 +15,22 @@ modify \
     --image_constraint "maskfile IS NOT NULL" \
     --out_dir test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-real-w64-wmask/eval \
     --out_prefix ${epoch}_
+```
+
+## For citycam source training on synthetic, testing on synthetic.
+```
+epoch=2
+
+python source_tester.py \
+  citycam train_output/citycam-synthetic-w132-goodtypes_only_3ch/pth/normal-drn_d_105-${epoch}.pth.tar \
+  --test_img_shape 132 132 --split "synthetic-w132-goodtypes"
+
+modify \
+  -i /home/etoropov/src/MCD_DA/segmentation/test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-synthetic-w132-goodtypes/normal-drn_d_105-${epoch}.tar/predicted.db \
+  --relpath /home/etoropov/src/MCD_DA/segmentation/test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-synthetic-w132-goodtypes/normal-drn_d_105-${epoch}.tar \
+  evaluateSegmentation --gt_db_file data/patches/Oct31-size400-pitch20to40/w132-e02-distort-ec20no-goodtypes.db \
+  --out_dir test_output/segmentation/test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-synthetic-w132-goodtypes/eval \
+  --out_prefix ${epoch}_
 ```
 
 ## For citycam adaptation.

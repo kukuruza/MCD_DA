@@ -22,8 +22,8 @@ For example, if you run an experiment on adaptation from svhn to mnist,
 ```
 python main.py --source svhn --target mnist --num_k 3
 ```
-, where num_k indicates the number of update for generator.
-If you want to run an experiment using gradient reversal layer, simply add option --one_step when running this code.
+, where `num_k` indicates the number of update for generator.
+If you want to run an experiment using gradient reversal layer, simply add option `--one_step` when running this code.
 ```
 python main.py --source svhn --target mnist --one_step
 ```
