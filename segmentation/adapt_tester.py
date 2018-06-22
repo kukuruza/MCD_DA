@@ -1,6 +1,6 @@
 import argparse
 import json
-import os
+import os, os.path as op
 from pprint import pprint
 
 import numpy as np
@@ -20,7 +20,7 @@ from transform import Scale
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done
 
 parser = argparse.ArgumentParser(description='Adapt tester for validation data')
-parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "citycam"])
+parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "citycam", "scotty"])
 parser.add_argument('trained_checkpoint', type=str, metavar="PTH.TAR")
 parser.add_argument('--outdir', type=str, default="test_output",
                     help='output directory')
@@ -94,7 +94,7 @@ label_transform = Compose([Scale(train_img_shape, Image.BILINEAR), ToTensor()])
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=True, input_ch=train_args.input_ch,
-                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 'url': 'url'})
 target_loader = data.DataLoader(tgt_dataset, batch_size=1, pin_memory=True, shuffle=False)
 
 try:
@@ -169,7 +169,7 @@ for index, batch in tqdm(enumerate(target_loader)):
         if index == 0:
             print ("pred label dir: %s" % label_outdir)
         mkdir_if_not_exist(label_outdir)
-        label_fn = os.path.join(label_outdir, path.split('/')[-1])
+        label_fn = os.path.join(label_outdir, '%s.png' % op.splitext(op.basename(path))[0])
         mask.save(label_fn)
 
         if args.tgt_dataset in ["city16", "synthia"]:

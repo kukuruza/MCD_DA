@@ -107,7 +107,7 @@ class CityDataSet(data.Dataset):
 
 class GTADataSet(data.Dataset):
     def __init__(self, root, split="images", img_transform=None, label_transform=None,
-                 test=False, input_ch=3):
+                 test=False, input_ch=3, keys_dict={}):
         # Note; split "train" and "images" are SAME!!!
 
         assert split in ["images", "test", "train"]
@@ -124,6 +124,7 @@ class GTADataSet(data.Dataset):
         self.v_flip = VerticalFlip()
         self.test = test
         data_dir = root
+        self.keys_dict = keys_dict
 
         imgsets_dir = osp.join(data_dir, "%s.txt" % split)
         with open(imgsets_dir) as imgset_file:
@@ -161,10 +162,71 @@ class GTADataSet(data.Dataset):
         if self.label_transform:
             label = self.label_transform(label)
 
-        if self.test:
-            return {'image': img, 'label_map': label, 'url': img_file}
+        item = {}
+        if 'image' in self.keys_dict:
+          item[self.keys_dict['image']] = img
+        if 'mask' in self.keys_dict:
+          item[self.keys_dict['mask']] = label
+        if 'url' in self.keys_dict:
+          item[self.keys_dict['url']] = img_file
 
-        return {'image': img, 'label_map': label}
+        return item
+
+
+class ScottyDataSet(data.Dataset):
+    def __init__(self, root, split="images", img_transform=None, label_transform=None,
+                 test=False, input_ch=3, keys_dict={}):
+        # Note; split "train" and "images" are SAME!!!
+
+        assert split in ["test", "train"]
+
+        assert input_ch in [1, 3]
+        self.input_ch = input_ch
+        self.root = root
+        self.split = split
+        # self.mean_bgr = np.array([104.00698793, 116.66876762, 122.67891434])
+        self.files = collections.defaultdict(list)
+        self.img_transform = img_transform
+        self.label_transform = label_transform
+        self.h_flip = HorizontalFlip()
+        self.v_flip = VerticalFlip()
+        self.test = test
+        data_dir = root
+        self.keys_dict = keys_dict
+
+        imgsets_dir = osp.join(data_dir, "%s.txt" % split)
+        with open(imgsets_dir) as imgset_file:
+            for name in imgset_file:
+                name = name.strip()
+                img_file = osp.join(data_dir, "%s" % name)
+                self.files[split].append({
+                    "img": img_file,
+                })
+
+    def __len__(self):
+        return len(self.files[self.split])
+
+    def __getitem__(self, index):
+        datafiles = self.files[self.split][index]
+
+        img_file = datafiles["img"]
+        img = Image.open(img_file).convert('RGB')
+        np3ch = np.array(img)
+        if self.input_ch == 1:
+            img = ImageOps.grayscale(img)
+
+        if self.img_transform:
+            img = self.img_transform(img)
+
+        item = {}
+        if 'image' in self.keys_dict:
+          item[self.keys_dict['image']] = img
+        #if 'mask' in self.keys_dict:
+        #  item[self.keys_dict['mask']] = label
+        if 'url' in self.keys_dict:
+          item[self.keys_dict['url']] = img_file
+
+        return item
 
 
 class SynthiaDataSet(data.Dataset):
@@ -350,7 +412,7 @@ class TestDataSet(data.Dataset):
 
 
 def get_dataset(dataset_name, split, img_transform, label_transform, test, input_ch, **kwargs):
-    assert dataset_name in ["gta", "city", "test", "city16", "synthia", "citycam"]
+    assert dataset_name in ["gta", "city", "test", "city16", "synthia", "citycam", "scotty"]
 
     name2obj = {
         "gta": GTADataSet,
@@ -358,14 +420,17 @@ def get_dataset(dataset_name, split, img_transform, label_transform, test, input
         "city16": CityDataSet,
         "synthia": SynthiaDataSet,
         "citycam": CitycamDataSet,
+        "scotty": ScottyDataSet,
     }
     ##Note fill in the blank below !! "gta....fill the directory over images folder.
+    datasets_dir = '/home/evgeny/datasets'
     name2root = {
-        "gta": "data/gta5",  ## Fill the directory over images folder. put train.txt, val.txt in this folder
+        "gta": osp.join(datasets_dir, "GTA5"),
         "city": "data/cityscrapes",  ## ex, ./www.cityscapes-dataset.com/file-handling
         "city16": "",  ## Same as city
         "synthia": "",  ## synthia/RAND_CITYSCAPES",
         "citycam": "data/citycam",
+        "scotty": osp.join(datasets_dir, "scotty")
     }
     dataset_obj = name2obj[dataset_name]
     root = name2root[dataset_name]
@@ -392,7 +457,7 @@ def check_src_tgt_ok(src_dataset_name, tgt_dataset_name):
 def get_n_class(src_dataset_name):
     if src_dataset_name in ["synthia", "city16"]:
         return 16
-    elif src_dataset_name in ["gta", "city", "test"]:
+    elif src_dataset_name in ["gta", "city", "test", "scotty"]:
         return 20
     elif src_dataset_name in ["citycam"]:
         return 2

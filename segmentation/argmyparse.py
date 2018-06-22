@@ -89,8 +89,8 @@ def get_da_base_training_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser(description='PyTorch Segmentation Adaptation')
 
-    parser.add_argument('src_dataset', type=str, choices=["gta", "city", "city16", "synthia", "citycam"])
-    parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "city16", "synthia", "citycam"])
+    parser.add_argument('src_dataset', type=str, choices=["gta", "city", "city16", "synthia", "citycam", "scotty"])
+    parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "city16", "synthia", "citycam", "scotty"])
     parser.add_argument('--src_split', type=str, default='train',
                         help="which split('train' or 'trainval' or 'val' or something else) is used ")
     parser.add_argument('--tgt_split', type=str, default='train',

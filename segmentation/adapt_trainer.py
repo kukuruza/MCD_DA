@@ -136,8 +136,8 @@ tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.tgt_split, i
 
 train_loader = torch.utils.data.DataLoader(
     ConcatDataset(
-        src_dataset,
-        tgt_dataset
+        (src_dataset,
+        tgt_dataset)
     ),
     batch_size=args.batch_size, shuffle=True,
     pin_memory=True)
