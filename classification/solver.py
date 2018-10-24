@@ -76,7 +76,7 @@ class Solver(object):
 #                    split='synthetic-w132-goodtypes',
                     split='real-w64, 1, yaw IS NOT NULL',
                     img_transform=img_transform, label_transform=label_transform,
-                    test=False, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label', 'yaw_raw': 'T_label_raw'})
+                    test=False, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label', 'yaw_raw': 'T_label_deg'})
 
             self.dataset_test = torch.utils.data.DataLoader(
                 dataset_test,
@@ -270,45 +270,80 @@ class Solver(object):
         self.G.eval()
         self.C1.eval()
         self.C2.eval()
-        test_loss = 0
-        correct1 = 0
-        correct2 = 0
-        correct3 = 0
-        size = 0
-        for batch_idx, data in enumerate(self.dataset_test):
-            img = data['T_image']
-            label = data['T_label']
-            img, label = img.cuda(), label.long().cuda()
-            with torch.no_grad():
-                img, label = Variable(img), Variable(label)
-            feat = self.G(img)
-            output1 = self.C1(feat)
-            output2 = self.C2(feat)
-            test_loss += F.nll_loss(output1, label).data
-            output_ensemble = output1 + output2
-            pred1 = output1.data.max(1)[1]
-            pred2 = output2.data.max(1)[1]
-            pred_ensemble = output_ensemble.data.max(1)[1]
-            k = label.data.size()[0]
-            label = label.data
-            correct1 += pred1.eq(label).cpu().sum()
-            correct2 += pred2.eq(label).cpu().sum()
-            correct3 += pred_ensemble.eq(label).cpu().sum() 
-            if self.source == 'citycam':
-                nextup = (data['T_label_raw'] / 360. * 12. - label.cpu().double() > 0.5).long().cuda()
-                label_next = torch.remainder(label - 1, 12) * (1. - nextup) \
-                           + torch.remainder(label + 1, 12) * nextup
-                correct1 += pred1.eq(label_next).cpu().sum()
-                correct2 += pred2.eq(label_next).cpu().sum()
-                correct3 += pred_ensemble.eq(label_next).cpu().sum()
-            size += k
-#            for m in range(10):
-#                print ('%1.f' % float(data['yaw_raw'][m].numpy()), label.cpu()[m].numpy(), pred1.data[m].cpu().numpy())
-        test_loss = test_loss / size
-        print(
-            '\nTest set: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
-                test_loss, correct1, size,
-                100. * correct1 / size, correct2, size, 100. * correct2 / size, correct3, size, 100. * correct3 / size))
+        if self.source == 'citycam':
+            size = 0
+            error_accum = 0.
+            test_loss = 0
+            for batch_idx, data in enumerate(self.dataset_test):
+                img = data['T_image']
+                label, label_deg = data['T_label'], data['T_label_deg']
+                img, label, label_deg = img.cuda(), label.long().cuda(), label_deg.float().cuda()
+                with torch.no_grad():
+                    img, label, label_deg = Variable(img), Variable(label), Variable(label_deg)
+                feat = self.G(img)
+                output1 = self.C1(feat)
+                output2 = self.C2(feat)
+                test_loss += F.nll_loss(output1, label).data
+                output_ensemble = output1 + output2
+                print ('output_ensemble', output_ensemble.size())
+                pred_val, pred_ind = torch.max(output_ensemble, dim=1)
+                print ('pred_val', pred_val.size())
+                # Get prediction of the one on the right and on the left.
+                predprev_val = output_ensemble[:, (pred_ind-1) % 12]      FIXME: this makes a tensor of 128x128
+                prednext_val = output_ensemble[:, (pred_ind+1) % 12]
+                print ('predprev_val', predprev_val.size())
+                pred_sumval = pred_val + predprev_val + prednext_val
+                # Get weighted prediction.
+                pred_frac = -predprev_val / pred_sumval + prednext_val / pred_sumval
+                pred_deg = (pred_ind.float() + pred_frac - 0.5) * 360. / 12.
+                print ('pred_frac', pred_frac.type(), pred_frac.size(), pred_frac)
+                print ('pred_deg', pred_deg.type(), pred_deg.size(), pred_deg)
+                print ('label_deg', label_deg.type(), label_deg.size())
+                # Error.
+                error = torch.min(torch.abs(pred_deg - label_deg),
+                                  torch.abs(pred_deg + 360. - label_deg))
+                error_accum += error.sum()[0]
+                size += label.data.size()[0]
+            test_loss /= float(size)
+            error_accum /= float(size)
+            print('\nTest set: Average loss: {:.4f}, L1 error: {:.4f}\n'.format(test_loss, error_accum))
+        else:
+            test_loss = 0
+            correct1 = 0
+            correct2 = 0
+            correct3 = 0
+            size = 0
+            for batch_idx, data in enumerate(self.dataset_test):
+                img = data['T_image']
+                label = data['T_label']
+                img, label = img.cuda(), label.long().cuda()
+                with torch.no_grad():
+                    img, label = Variable(img), Variable(label)
+                feat = self.G(img)
+                output1 = self.C1(feat)
+                output2 = self.C2(feat)
+                test_loss += F.nll_loss(output1, label).data
+                output_ensemble = output1 + output2
+                pred1 = output1.data.max(1)[1]
+                pred2 = output2.data.max(1)[1]
+                pred_ensemble = output_ensemble.data.max(1)[1]
+                k = label.data.size()[0]
+                label = label.data
+                correct1 += pred1.eq(label).cpu().sum()
+                correct2 += pred2.eq(label).cpu().sum()
+                correct3 += pred_ensemble.eq(label).cpu().sum() 
+                size += k
+            test_loss = test_loss / size
+            print(
+                '\nTest set: Average loss: {:.4f}, Accuracy C1: {}/{} ({:.0f}%) Accuracy C2: {}/{} ({:.0f}%) Accuracy Ensemble: {}/{} ({:.0f}%) \n'.format(
+                    test_loss, correct1, size,
+                    100. * correct1 / size, correct2, size, 100. * correct2 / size, correct3, size, 100. * correct3 / size))
+            if record_file:
+                record = open(record_file, 'a')
+                print('recording %s', record_file)
+                record.write('%s %s %s\n' % (float(correct1) / size, float(correct2) / size, float(correct3) / size))
+                record.close()
+
         if save_model and epoch % self.save_epoch == 0:
             torch.save(self.G,
                        '%s/%s_to_%s_model_epoch%s_G.pt' % (self.checkpoint_dir, self.source, self.target, epoch))
@@ -316,8 +351,3 @@ class Solver(object):
                        '%s/%s_to_%s_model_epoch%s_C1.pt' % (self.checkpoint_dir, self.source, self.target, epoch))
             torch.save(self.C2,
                        '%s/%s_to_%s_model_epoch%s_C2.pt' % (self.checkpoint_dir, self.source, self.target, epoch))
-        if record_file:
-            record = open(record_file, 'a')
-            print('recording %s', record_file)
-            record.write('%s %s %s\n' % (float(correct1) / size, float(correct2) / size, float(correct3) / size))
-            record.close()

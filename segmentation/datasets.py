@@ -290,14 +290,14 @@ class CitycamDataSet(data.Dataset):
 
         yaw = self.carField(car_entry['entry'], 'yaw')
         if yaw is not None:
-            yaw_discr = int(floor(yaw / 360 * 12)) % 12
+            yaw_discr = int(floor(yaw / 360 * 12 + 0.5)) % 12
             logging.debug('CitycamDataSet: yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
             if 'yaw' in self.keys_dict:
               item[self.keys_dict['yaw']] = yaw_discr
             if 'yaw_onehot' in self.keys_dict:
               item[self.keys_dict['yaw_onehot']] = self._onehot_yaw(yaw)
             if 'yaw_raw' in self.keys_dict:
-              item[self.keys_dict['yaw_raw']] = yaw
+              item[self.keys_dict['yaw_raw']] = yaw % 360
 
         pitch = self.carField(car_entry['entry'], 'pitch')
         if pitch is not None and 'pitch' in self.keys_dict:
