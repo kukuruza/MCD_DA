@@ -25,7 +25,8 @@ args = parser.parse_args()
 args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
 
-logging.basicConfig(level=args.logging, format='%(levelname)s: %(message)s')
+FORMAT = '[%(filename)s:%(lineno)s - %(funcName)s() %(levelname)s]: %(message)s'
+logging.basicConfig(level=args.logging, format=FORMAT)
 
 if args.resume:
     print("=> loading checkpoint '{}'".format(args.resume))

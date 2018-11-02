@@ -237,61 +237,56 @@ class CitycamDataSet(data.Dataset):
                 keys_dict={}  # Necessary keys and their names for gititem.
                 ):
         import os, sys
-        sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
-        from db.lib.dbDataset import CityimagesDataset, CitycarsDataset, CitymatchesDataset
-        from db.lib.helperDb import carField
+        sys.path.insert(0, os.path.join(os.getenv('HOME'), 'projects/shuffler/lib'))
+        from interfacePytorch import ImagesDataset, ObjectsDataset
+        from backendDb import objectField
 
         # Parse info from split.
         split_list = split.split(',')
         split = split_list[0]
-        image_constraint = split_list[1] if len(split_list) > 1 else '1'
-        car_constraint = split_list[2] if len(split_list) > 2 else '1'
+        where_object = split_list[2] if len(split_list) > 2 else '1'
 
         self.img_transform = img_transform
         self.label_transform = label_transform
-        self.carField = carField
 
         db_file = os.path.realpath(os.path.join(root, split + '.db'))
-        logging.info('CitycamDataSet: db_file is resolved to "%s"' % db_file)
+        logging.info('db_file is resolved to "%s"' % db_file)
         assert os.path.exists(db_file)
-        self.dataset = CitycarsDataset(db_file=db_file,
-                image_constraint=image_constraint, car_constraint=car_constraint,
-                fraction=1., crop_car=False, randomly=False, with_mask=True)
+        self.dataset = ObjectsDataset(db_file=db_file, rootdir=os.getenv('CITY_PATH'), where_object=where_object)
         self.size = len(self.dataset)
 
         self.keys_dict = keys_dict
 
     def __getitem__(self, index):
-        car_entry = self.dataset[index]
+        car = self.dataset[index]
 
-        imagefile = self.carField(car_entry['entry'], 'imagefile')
-
-        image_original = car_entry['image'].copy()
+        image_original = car['image'].copy()  # Save the original.
         if self.img_transform:
             image = Image.fromarray(image_original)
             image = self.img_transform(image)
 
-        #print (car_entry['entry'])
+        #print (item)
         item = {}
         if 'image' in self.keys_dict:
           item[self.keys_dict['image']] = image
         if 'url' in self.keys_dict:
-          item[self.keys_dict['url']] = imagefile
+          item[self.keys_dict['url']] = car['imagefile']
         if 'image_original' in self.keys_dict:
           item[self.keys_dict['image_original']] = image_original
 
-        mask = car_entry['mask']
-        if mask is not None and 'mask' in self.keys_dict:
-            mask = np.bitwise_not(mask).astype(np.uint8) * 255  # Background is 255 now.
+        if 'mask' in self.keys_dict:
+            mask = car['mask']
+            assert mask is not None
+            mask = (mask < 128).astype(np.uint8) * 255  # Background is 255 now.
             if self.label_transform:
                 mask = Image.fromarray(mask).convert("P")
                 mask = self.label_transform(mask)
             item[self.keys_dict['mask']] = mask
 
-        yaw = self.carField(car_entry['entry'], 'yaw')
-        if yaw is not None:
+        if 'yaw' in self.keys_dict:
+            yaw = float(car['yaw'])
             yaw_discr = int(floor(yaw / 360 * 12 + 0.5)) % 12
-            logging.debug('CitycamDataSet: yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
+            logging.debug('Yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
             if 'yaw' in self.keys_dict:
               item[self.keys_dict['yaw']] = yaw_discr
             if 'yaw_onehot' in self.keys_dict:
@@ -299,8 +294,8 @@ class CitycamDataSet(data.Dataset):
             if 'yaw_raw' in self.keys_dict:
               item[self.keys_dict['yaw_raw']] = yaw % 360
 
-        pitch = self.carField(car_entry['entry'], 'pitch')
-        if pitch is not None and 'pitch' in self.keys_dict:
+        if 'pitch' in self.keys_dict:
+            pitch = float(car['pitch'])
             pitch /= 90.
             item[self.keys_dict['pitch']] = pitch
 

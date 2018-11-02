@@ -1,63 +1,67 @@
-## For citycam source training on synthetic, testing on real.
-```
-python source_trainer.py citycam --split synthetic-w132-goodtypes --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss --max_iter 1000000
-
-epoch=2
-
-python source_tester.py \
-  citycam train_output/citycam-synthetic-w132-goodtypes_only_3ch/pth/normal-drn_d_105-${epoch}.pth.tar \
-  --test_img_shape 64 64 --split "real-w64-wmask"
-
-output_dir=test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-real-w64-wmask
-modify \
-  -i /home/etoropov/src/MCD_DA/segmentation/${output_dir}/normal-drn_d_105-${epoch}.tar/predicted.db \
-  --relpath /home/etoropov/src/MCD_DA/segmentation/${output_dir}/normal-drn_d_105-${epoch}.tar \
-  evaluateSegmentation --gt_db_file data/patches/Oct10-real/w55-goodtypes-e04-filt-onlywmask.db \
-    --image_constraint "maskfile IS NOT NULL" \
-    --out_dir ${output_dir}/eval \
-    --out_prefix ${epoch}_
-```
-
-## For citycam source training on synthetic, testing on synthetic.
-```
-epoch=2
-
-python source_tester.py \
-  citycam train_output/citycam-synthetic-w132-goodtypes_only_3ch/pth/normal-drn_d_105-${epoch}.pth.tar \
-  --test_img_shape 132 132 --split "synthetic-w132-goodtypes"
-
-output_dir=test_output/citycam-synthetic-w132-goodtypes_only_3ch---citycam-synthetic-w132-goodtypes
-modify \
-  -i /home/etoropov/src/MCD_DA/segmentation/${output_dir}/normal-drn_d_105-${epoch}.tar/predicted.db \
-  --relpath /home/etoropov/src/MCD_DA/segmentation/${output_dir}/normal-drn_d_105-${epoch}.tar \
-  evaluateSegmentation --gt_db_file data/patches/Oct31-size400-pitch20to40/w132-e02-distort-ec20no-goodtypes.db \
-  --out_dir ${output_dir}/eval \
-  --out_prefix ${epoch}_
-```
-
 ## For citycam adaptation.
+```
+CUDA_VISIBLE_DEVICES=1 && src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && basename='batch10' && \
+  python adapt_trainer.py citycam citycam --src_split ${src_split} --tgt_split ${tgt_split} \
+  --net drn_d_105 --batch_size 10 \
+  --train_img_shape 64 64 --add_bg_loss --max_iter 10000000 --savename ${basename}
+
+CUDA_VISIBLE_DEVICES=1 && src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && test_split='real-Sept23-test' && basename='batch10-onestep' && \
+  for epoch in 1 2 3 4 5 6 7 8 9 10; do \
+  python adapt_tester.py citycam train_output/citycam-${src_split}2citycam-${tgt_split}_3ch/pth/MCD-${basename}-drn_d_105-${epoch}.pth.tar \
+  --net drn_d_105 --test_img_shape 64 64 --split ${test_split} --add_bg_loss; \
+  done
+
+src_split='synthetic-Sept19' && split='real-Sept23-train0.5' && test_split='real-Sept23-test' && subset='test' && basename='batch10' && \
+  for epoch in 1 2 3 4 5 6 7 8 9 10; do \
+  test_output_dir=citycam-${split}_only_3ch---citycam-${test_split}/${basename}-drn_d_105-${epoch}.tar && \
+  ${HOME}/projects/shuffler/shuffler.py \
+  -i /home/etoropov/src/MCD_DA/segmentation/test_output/${test_output_dir}/predictedtop.db --rootdir $CITY_PATH \
+  evaluateSegmentationIoU \
+  --gt_db_file $CITY_PATH/data/patches/Sept23-real/${subset}.db  \
+  --gt_mapping_dict '{"<10": "background", ">245": "car"}'; \
+  done
+```
+
+## For citycam source training on synthetic, testing on real.
 
 ```
-python adapt_trainer.py citycam citycam \
-  --src_split synthetic-w132-goodtypes  --tgt_split real-w64  --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss --max_iter 1000000
+CUDA_VISIBLE_DEVICES=1 && src_split='real-Sept23-train' && basename='batch10' && \
+  python source_trainer.py citycam --split ${src_split} \
+  --net drn_d_105 --batch_size 10 \
+  --train_img_shape 64 64 --add_bg_loss --max_iter 10000000 --savename ${basename}
 
-epoch=10
+CUDA_VISIBLE_DEVICES=1 && split='real-Sept23-train' && test_split='real-Sept23-test' && basename='batch10-onestep' && \
+  for epoch in 1 2 3 4 5 6 7 8 9 10; do \
+  python source_tester.py citycam train_output/citycam-${split}_only_3ch/pth/${basename}-drn_d_105-${epoch}.pth.tar \
+  --test_img_shape 64 64 --split ${test_split}; \
+  done
 
-python adapt_tester.py citycam \
-  train_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch/pth/MCD-normal-drn_d_105-${epoch}.pth.tar \
-  --net drn_d_105 --test_img_shape 64 64 --split "real-w64-wmask" --add_bg_loss
+# Evaluate
+src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && test_split='real-Sept23-test' && subset='test' && basename='batch10-onestep' && \
+  for epoch in 1 2 3 4 5 6 7 8 9 10; do \
+  test_output_dir=citycam-${src_split}2citycam-${tgt_split}_3ch---citycam-${test_split}/MCD-${basename}-drn_d_105-${epoch}.tar && \
+  ${HOME}/projects/shuffler/shuffler.py \
+  -i /home/etoropov/src/MCD_DA/segmentation/test_output/${test_output_dir}/predictedtop.db --rootdir $CITY_PATH \
+  evaluateSegmentationIoU \
+  --gt_db_file $CITY_PATH/data/patches/Sept23-real/${subset}.db  \
+  --gt_mapping_dict '{"<10": "background", ">245": "car"}'; \
+  done
 
-# Full path is important in '-i' argument.
-modify \
-  -i /home/etoropov/src/MCD_DA/segmentation/test_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch---citycam-real-w64-wmask/MCD-normal-drn_d_105-${epoch}.tar/predicted.db \
-  --relpath test_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch---citycam-real-w64-wmask/MCD-normal-drn_d_105-${epoch}.tar \
-  evaluateSegmentation --gt_db_file data/patches/Oct10-real/w55-goodtypes-e04-filt-onlywmask.db \
-    --image_constraint "maskfile IS NOT NULL" \
-    --out_dir test_output/citycam-synthetic-w132-goodtypes2citycam-real-w64_3ch---citycam-real-w64-wmask/eval \
-    --out_prefix ${epoch}_
+
+src_split='synthetic-Sept19'
+
+python source_trainer.py citycam --split ${src_split} --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss --max_iter 1000000
+
+epoch=2
+test_split='real-Sept23-test'
+test_subset='test'
+
+python source_tester.py \
+  citycam train_output/citycam-${src_split}_only_3ch/pth/normal-drn_d_105-${epoch}.pth.tar \
+  --test_img_shape 64 64 --split ${test_split}
+
+test_output_dir=citycam-${src_split}_only_3ch---citycam-${test_split}/normal-drn_d_105-${epoch}.tar
 ```
-
-
 
 # Maximum Classifier Discrepancy for Domain Adaptation with Semantic Segmentation Implemented by PyTorch
 

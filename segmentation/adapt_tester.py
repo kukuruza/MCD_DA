@@ -11,6 +11,7 @@ from torch.autograd import Variable
 from torch.utils import data
 from torchvision.transforms import Compose, Normalize, ToTensor
 from tqdm import tqdm
+import cv2
 
 from argmyparse import add_additional_params_to_args
 from argmyparse import fix_img_shape_args
@@ -94,8 +95,8 @@ label_transform = Compose([Scale(train_img_shape, Image.BILINEAR), ToTensor()])
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=True, input_ch=train_args.input_ch,
-                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
-target_loader = data.DataLoader(tgt_dataset, batch_size=1, pin_memory=True, shuffle=False)
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 'url': 'url'})
+target_loader = data.DataLoader(tgt_dataset, batch_size=10, pin_memory=True, shuffle=False)
 
 try:
     G, F1, F2 = get_models(net_name=train_args.net, res=train_args.res, input_ch=train_args.input_ch,
@@ -124,69 +125,60 @@ if torch.cuda.is_available():
     F2.cuda()
 
 if args.tgt_dataset == 'citycam':
-    import sys
-    sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
-    from db.lib.dbExport import DatasetWriter
+    import os, sys
+    sys.path.insert(0, os.path.join(os.getenv('HOME'), 'projects/shuffler/lib'))
+    from interfaceWriter import DatasetVideoWriter
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predicted.db"))
-    writer = DatasetWriter(out_db_file=out_db_file, overwrite=True)
+    writer_prob = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
+    out_db_file = os.path.abspath(os.path.join(base_outdir, "predictedtop.db"))
+    writer_top = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
 
 for index, batch in tqdm(enumerate(target_loader)):
+    assert 'image' in batch and 'url' in batch, batch.keys()
     imgs, paths = batch['image'], batch['url']
-    assert imgs.size()[0] == 1, 'Batch size is supposed to be 1.'
-    path = paths[0]
-
     imgs = Variable(imgs)
     if torch.cuda.is_available():
         imgs = imgs.cuda()
 
     feature = G(imgs)
-    outputs = F1(feature)
+    preds = F1(feature)
 
     if args.use_f2:
-        outputs += F2(feature)
-
-    if args.saves_prob:
-        # Save probability tensors
-        prob_outdir = os.path.join(base_outdir, "prob")
-        mkdir_if_not_exist(prob_outdir)
-        prob_outfn = os.path.join(prob_outdir, path.split('/')[-1].replace('png', 'npy'))
-        np.save(prob_outfn, outputs[0].data.cpu().numpy())
+        preds += F2(feature)
 
     # Save predicted pixel labels(pngs)
-    if args.add_bg_loss:
-        pred = outputs[0, :args.n_class].data.max(0)[1].cpu()
-    else:
-        pred = outputs[0, :args.n_class - 1].data.max(0)[1].cpu()
+    for path, pred in zip(paths, preds):
+        logging.debug('Working on item "%s"' % path)
 
-    mask = Image.fromarray(np.uint8(pred.numpy()))
-    mask = mask.resize(test_img_shape, Image.NEAREST)
-    if args.tgt_dataset == 'citycam':
-        imagenp = batch['image_original'][0].numpy()
-        masknp = np.array(mask) < 0.5  # Background was 1.
-        writer.add_image(imagenp, mask=masknp)
-    else:
-        label_outdir = os.path.join(base_outdir, "label")
-        if index == 0:
-            print ("pred label dir: %s" % label_outdir)
-        mkdir_if_not_exist(label_outdir)
-        label_fn = os.path.join(label_outdir, path.split('/')[-1])
-        mask.save(label_fn)
-
-        if args.tgt_dataset in ["city16", "synthia"]:
-            info_json_fn = "./dataset/synthia2cityscapes_info.json"
+        if train_args.add_bg_loss:
+            pred = pred[:train_args.n_class].data.cpu()
         else:
-            info_json_fn = "./dataset/city_info.json"
+            pred = pred[:train_args.n_class - 1].data.cpu()
 
-        # Save visualized predicted pixel labels(pngs)
-        with open(info_json_fn) as f:
-            city_info_dic = json.load(f)
+        if args.tgt_dataset == 'citycam':
+            pred = torch.softmax(pred, dim=0)
+            # Write the probability.
+            prob = pred[0]  # Take the first channel, which is the object.
+            mask = np.uint8((prob * 255).numpy())
+            mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
+            writer_prob.addImage(mask=mask, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
+            # Write the argmax class
+            argmax_pred = np.argmax(pred.numpy(), axis=0)
+            mask = 255 - np.uint8(argmax_pred * 255)
+            mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
+            writer_top.addImage(mask=mask, imagefile=path)
+        else:
+            argmax_pred = pred.max(0)[1]
+            mask = Image.fromarray(np.uint8(pred.numpy()))
+            mask = mask.resize(test_img_shape, Image.NEAREST)
+            label_outdir = os.path.join(base_outdir, "label")
+            if index == 0:
+                print ("pred label dir: %s" % label_outdir)
+            mkdir_if_not_exist(label_outdir)
+            label_fn = os.path.join(label_outdir, path.split('/')[-1])
+            mask.save(label_fn)
 
-        palette = np.array(city_info_dic['palette'], dtype=np.uint8)
-        mask.putpalette(palette.flatten())
-        vis_outdir = os.path.join(base_outdir, "vis")
-        mkdir_if_not_exist(vis_outdir)
-        vis_fn = os.path.join(vis_outdir, path.split('/')[-1]) + '.png'
-        mask.save(vis_fn)
 
 if args.tgt_dataset == 'citycam':
-    writer.close()
+    writer_prob.close()
+    writer_top.close()

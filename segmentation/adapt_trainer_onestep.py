@@ -15,10 +15,10 @@ from loss import CrossEntropyLoss2d, get_prob_distance_criterion
 from models.model_util import get_models, get_optimizer
 from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontalFlip, RandomRotation
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done, save_checkpoint, adjust_learning_rate, \
-    get_class_weight_from_file, set_debugger_org_frc
+    get_class_weight_from_file #, set_debugger_org_frc
 
 # from visualize import LinePlotter
-set_debugger_org_frc()
+#set_debugger_org_frc()
 parser = get_da_mcd_training_parser()
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
@@ -177,7 +177,7 @@ for epoch in range(start_epoch, args.epochs):
 
         c_loss = criterion(outputs1, src_lbls)
         c_loss += criterion(outputs2, src_lbls)
-        c_loss.backward(retain_variables=True)
+        c_loss.backward(retain_graph=True)
         lambd = 1.0
         model_f1.set_lambda(lambd)
         model_f2.set_lambda(lambd)

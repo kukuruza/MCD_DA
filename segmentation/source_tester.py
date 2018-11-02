@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import logging
 from pprint import pprint
 import numpy as np
 import torch
@@ -9,6 +10,7 @@ from torch.autograd import Variable
 from torch.utils import data
 from torchvision.transforms import Compose, Normalize, ToTensor
 from tqdm import tqdm
+import cv2
 
 from argmyparse import add_additional_params_to_args, fix_img_shape_args
 from datasets import get_dataset
@@ -26,13 +28,17 @@ parser.add_argument('--test_img_shape', default=(2048, 1024), nargs=2,
                     help="W H, FOR Valid(2048, 1024) Test(1280, 720)")
 parser.add_argument("---saves_prob", action="store_true",
                     help='whether you save probability tensors')
+parser.add_argument('--logging', type=int, choices=[10,20,30,40], default=20)
 
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
 
+FORMAT = '[%(filename)s:%(lineno)s - %(funcName)s() %(levelname)s]: %(message)s'
+logging.basicConfig(level=args.logging, format=FORMAT)
+
 if not os.path.exists(args.trained_checkpoint):
-    raise OSError("%s does not exist!" % args.resume)
+    raise OSError("%s does not exist!" % args.trained_checkpoint)
 
 checkpoint = torch.load(args.trained_checkpoint)
 train_args = checkpoint['args']  # Load args!
@@ -75,9 +81,9 @@ label_transform = Compose([
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=True, input_ch=train_args.input_ch,
-                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 'url': 'url'})
 
-target_loader = data.DataLoader(tgt_dataset, batch_size=1, pin_memory=True)
+target_loader = data.DataLoader(tgt_dataset, batch_size=10, pin_memory=True)
 
 if torch.cuda.is_available():
     model.cuda()
@@ -85,16 +91,17 @@ if torch.cuda.is_available():
 model.eval()
 
 if args.tgt_dataset == 'citycam':
-    import sys
-    sys.path.insert(0, os.path.join(os.getenv('CITY_PATH'), 'src'))
-    from db.lib.dbExport import DatasetWriter
+    import os, sys
+    sys.path.insert(0, os.path.join(os.getenv('HOME'), 'projects/shuffler/lib'))
+    from interfaceWriter import DatasetVideoWriter
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predicted.db"))
-    writer = DatasetWriter(out_db_file=out_db_file, overwrite=True)
+    writer_prob = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
+    out_db_file = os.path.abspath(os.path.join(base_outdir, "predictedtop.db"))
+    writer_top = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
 
 for index, batch in tqdm(enumerate(target_loader)):
     assert 'image' in batch and 'url' in batch, batch.keys()
     imgs, paths = batch['image'], batch['url']
-    path = paths[0]
     imgs = Variable(imgs)
     if torch.cuda.is_available():
         imgs = imgs.cuda()
@@ -104,49 +111,55 @@ for index, batch in tqdm(enumerate(target_loader)):
     if train_args.net == "psp":
         preds = preds[0]
 
-    if args.saves_prob:
-        # Save probability tensors
-        prob_outdir = os.path.join(base_outdir, "prob")
-        mkdir_if_not_exist(prob_outdir)
-        prob_outfn = os.path.join(prob_outdir, path.split('/')[-1].replace('png', 'npy'))
-        np.save(prob_outfn, preds[0].data.cpu().numpy())
-
     # Save predicted pixel labels(pngs)
-    if train_args.add_bg_loss:
-        pred = preds[0, :train_args.n_class].data.max(0)[1].cpu()
-    else:
-        pred = preds[0, :train_args.n_class - 1].data.max(0)[1].cpu()
+    for path, pred in zip(paths, preds):
+        logging.debug('Working on item "%s"' % path)
 
-    mask = Image.fromarray(np.uint8(pred.numpy()))
-    mask = mask.resize(test_img_shape, Image.NEAREST)
-    if args.tgt_dataset == 'citycam':
-        imagenp = batch['image_original'][0].numpy()
-        masknp = np.array(mask) < 0.5  # Background was 1.
-        writer.add_image(imagenp, mask=masknp)
-    else:
-        label_outdir = os.path.join(base_outdir, "label")
-        if index == 0:
-            print ("pred label dir: %s" % label_outdir)
-        mkdir_if_not_exist(label_outdir)
-        label_fn = os.path.join(label_outdir, path.split('/')[-1])
-        mask.save(label_fn)
-
-        #  Save visualized predicted pixel labels(pngs)
-        if args.tgt_dataset in ["city16", "synthia"]:
-            info_json_fn = "./dataset/synthia2cityscapes_info.json"
+        if train_args.add_bg_loss:
+            pred = pred[:train_args.n_class].data.cpu()
         else:
-            info_json_fn = "./dataset/city_info.json"
+            pred = pred[:train_args.n_class - 1].data.cpu()
 
-        # Save visualized predicted pixel labels(pngs)
-        with open(info_json_fn) as f:
-            city_info_dic = json.load(f)
+        if args.tgt_dataset == 'citycam':
+            pred = torch.softmax(pred, dim=0)
+            # Write the probability.
+            prob = pred[0]  # Take the first channel, which is the object.
+            mask = np.uint8((prob * 255).numpy())
+            mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
+            writer_prob.addImage(mask=mask, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
+            # Write the argmax class
+            argmax_pred = np.argmax(pred.numpy(), axis=0)
+            mask = 255 - np.uint8(argmax_pred * 255)
+            mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
+            writer_top.addImage(mask=mask, imagefile=path)
+        else:
+            argmax_pred = pred.max(0)[1]
+            mask = Image.fromarray(np.uint8(pred.numpy()))
+            mask = mask.resize(test_img_shape, Image.NEAREST)
+            label_outdir = os.path.join(base_outdir, "label")
+            if index == 0:
+                print ("pred label dir: %s" % label_outdir)
+            mkdir_if_not_exist(label_outdir)
+            label_fn = os.path.join(label_outdir, path.split('/')[-1])
+            mask.save(label_fn)
 
-        palette = np.array(city_info_dic['palette'], dtype=np.uint8)
-        mask.putpalette(palette.flatten())
-        vis_outdir = os.path.join(base_outdir, "vis")
-        mkdir_if_not_exist(vis_outdir)
-        vis_fn = os.path.join(vis_outdir, path.split('/')[-1])
-        mask.save(vis_fn)
+            #  Save visualized predicted pixel labels(pngs)
+            if args.tgt_dataset in ["city16", "synthia"]:
+                info_json_fn = "./dataset/synthia2cityscapes_info.json"
+            else:
+                info_json_fn = "./dataset/city_info.json"
+
+            # Save visualized predicted pixel labels(pngs)
+            with open(info_json_fn) as f:
+                city_info_dic = json.load(f)
+
+            palette = np.array(city_info_dic['palette'], dtype=np.uint8)
+            mask.putpalette(palette.flatten())
+            vis_outdir = os.path.join(base_outdir, "vis")
+            mkdir_if_not_exist(vis_outdir)
+            vis_fn = os.path.join(vis_outdir, path.split('/')[-1])
+            mask.save(vis_fn)
 
 if args.tgt_dataset == 'citycam':
-    writer.close()
+    writer_prob.close()
+    writer_top.close()
