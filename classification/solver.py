@@ -57,13 +57,13 @@ class Solver(object):
             ])
 
             src_dataset = get_dataset(dataset_name='citycam',
-                    split='synthetic-w132-goodtypes',
+                    split='synthetic-Sept19',
                     img_transform=img_transform, label_transform=label_transform,
                     test=False, input_ch=3,
                     keys_dict={'image': 'S_image', 'yaw': 'S_label'})
 
             tgt_dataset = get_dataset(dataset_name='citycam',
-                    split='real-w64',
+                    split='real-Sept23-train',
                     img_transform=img_transform, label_transform=label_transform,
                     test=False, input_ch=3, keys_dict={'image': 'T_image'})
 
@@ -73,8 +73,7 @@ class Solver(object):
                 pin_memory=True)
 
             dataset_test = get_dataset(dataset_name='citycam',
-#                    split='synthetic-w132-goodtypes',
-                    split='real-w64, 1, yaw IS NOT NULL',
+                    split='real-w64,1,yaw IS NOT NULL',
                     img_transform=img_transform, label_transform=label_transform,
                     test=False, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label', 'yaw_raw': 'T_label_deg'})
 

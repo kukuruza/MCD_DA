@@ -3,7 +3,7 @@
 CUDA_VISIBLE_DEVICES=1 && src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && basename='batch10' && \
   python adapt_trainer.py citycam citycam --src_split ${src_split} --tgt_split ${tgt_split} \
   --net drn_d_105 --batch_size 10 \
-  --train_img_shape 64 64 --add_bg_loss --max_iter 10000000 --savename ${basename}
+  --train_img_shape 64 64 --add_bg_loss --savename ${basename}
 
 CUDA_VISIBLE_DEVICES=1 && src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && test_split='real-Sept23-test' && basename='batch10-onestep' && \
   for epoch in 1 2 3 4 5 6 7 8 9 10; do \
@@ -28,7 +28,7 @@ src_split='synthetic-Sept19' && split='real-Sept23-train0.5' && test_split='real
 CUDA_VISIBLE_DEVICES=1 && src_split='real-Sept23-train' && basename='batch10' && \
   python source_trainer.py citycam --split ${src_split} \
   --net drn_d_105 --batch_size 10 \
-  --train_img_shape 64 64 --add_bg_loss --max_iter 10000000 --savename ${basename}
+  --train_img_shape 64 64 --add_bg_loss --savename ${basename}
 
 CUDA_VISIBLE_DEVICES=1 && split='real-Sept23-train' && test_split='real-Sept23-test' && basename='batch10-onestep' && \
   for epoch in 1 2 3 4 5 6 7 8 9 10; do \
@@ -46,21 +46,6 @@ src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && test_split='rea
   --gt_db_file $CITY_PATH/data/patches/Sept23-real/${subset}.db  \
   --gt_mapping_dict '{"<10": "background", ">245": "car"}'; \
   done
-
-
-src_split='synthetic-Sept19'
-
-python source_trainer.py citycam --split ${src_split} --net drn_d_105 --batch_size 1 --train_img_shape 64 64 --add_bg_loss --max_iter 1000000
-
-epoch=2
-test_split='real-Sept23-test'
-test_subset='test'
-
-python source_tester.py \
-  citycam train_output/citycam-${src_split}_only_3ch/pth/normal-drn_d_105-${epoch}.pth.tar \
-  --test_img_shape 64 64 --split ${test_split}
-
-test_output_dir=citycam-${src_split}_only_3ch---citycam-${test_split}/normal-drn_d_105-${epoch}.tar
 ```
 
 # Maximum Classifier Discrepancy for Domain Adaptation with Semantic Segmentation Implemented by PyTorch

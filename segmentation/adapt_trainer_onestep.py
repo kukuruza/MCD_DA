@@ -196,7 +196,7 @@ for epoch in range(start_epoch, args.epochs):
         if ind % 100 == 0:
             print("iter [%d] DLoss: %.6f CLoss: %.4f Lambd: %.4f" % (ind, d_loss, c_loss, lambd))
 
-        if ind > args.max_iter:
+        if args.max_iter is not None and ind > args.max_iter:
             break
 
     print("Epoch [%d] DLoss: %.4f CLoss: %.4f" % (epoch, d_loss_per_epoch, c_loss_per_epoch))

@@ -1,4 +1,5 @@
 classification/record
+classification/data/citycam
 classification/data/svhn
 classification/data/mnist_data.mat
 classification/checkpoint

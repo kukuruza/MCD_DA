@@ -57,12 +57,12 @@ class Solver(object):
             ])
 
             src_dataset_test = get_dataset(dataset_name='citycam',
-                    split='synthetic-w132-goodtypes',
+                    split='synthetic-Sept19',
                     img_transform=img_transform, label_transform=label_transform,
                     test=True, input_ch=3, keys_dict={'image': 'image', 'yaw': 'label', 'yaw_raw': 'label_raw'})
 
             tgt_dataset_test = get_dataset(dataset_name='citycam',
-                    split='real-w64, 1, yaw IS NOT NULL',
+                    split='real-Sept23-train, objectid IN (SELECT objectid FROM properties WHERE key="yaw")',
                     img_transform=img_transform, label_transform=label_transform,
                     test=True, input_ch=3, keys_dict={'image': 'image', 'yaw': 'label', 'yaw_raw': 'label_raw'})
 
@@ -73,7 +73,7 @@ class Solver(object):
                 pin_memory=True)
 
             dataset_train = get_dataset(dataset_name='citycam',
-                    split='synthetic-w132-goodtypes',
+                    split='synthetic-Sept19',
                     img_transform=img_transform, label_transform=label_transform,
                     test=False, input_ch=3, keys_dict={'image': 'S_image', 'yaw': 'S_label', 'yaw_raw': 'S_label_raw'})
 

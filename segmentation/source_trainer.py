@@ -147,7 +147,7 @@ for epoch in range(args.epochs):
         if ind % 100 == 0:
             print("iter [%d] CLoss: %.4f" % (ind, c_loss))
 
-        if ind > args.max_iter:
+        if args.max_iter is not None and ind > args.max_iter:
             break
 
     print("Epoch [%d] Loss: %.4f" % (epoch + 1, epoch_loss))

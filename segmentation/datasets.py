@@ -234,8 +234,13 @@ class CitycamDataSet(data.Dataset):
 
     def __init__(self, root, split, img_transform=None, label_transform=None,
                 test=False, input_ch=3, 
-                keys_dict={}  # Necessary keys and their names for gititem.
-                ):
+                keys_dict={}):
+        ''' 
+        Args:
+            split:      The name of the db in segmentation/data/citycam without ext.
+                        After a comma, the WHERE clause for objects can be specified.
+            keys_dict:  Necessary keys and their names for gititem.
+        '''
         import os, sys
         sys.path.insert(0, os.path.join(os.getenv('HOME'), 'projects/shuffler/lib'))
         from interfacePytorch import ImagesDataset, ObjectsDataset
@@ -244,11 +249,12 @@ class CitycamDataSet(data.Dataset):
         # Parse info from split.
         split_list = split.split(',')
         split = split_list[0]
-        where_object = split_list[2] if len(split_list) > 2 else '1'
+        where_object = split_list[1] if len(split_list) > 1 else 'TRUE'
 
         self.img_transform = img_transform
         self.label_transform = label_transform
 
+        logging.info('Dataset root: %s, split: %s' % (split, root))
         db_file = os.path.realpath(os.path.join(root, split + '.db'))
         logging.info('db_file is resolved to "%s"' % db_file)
         assert os.path.exists(db_file)
