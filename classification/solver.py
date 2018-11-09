@@ -73,7 +73,7 @@ class Solver(object):
                 pin_memory=True)
 
             dataset_test = get_dataset(dataset_name='citycam',
-                    split='real-w64,1,yaw IS NOT NULL',
+                    split='real-Sept23-test, objectid IN (SELECT objectid FROM properties WHERE key="yaw")',
                     img_transform=img_transform, label_transform=label_transform,
                     test=False, input_ch=3, keys_dict={'image': 'T_image', 'yaw': 'T_label', 'yaw_raw': 'T_label_deg'})
 
@@ -100,9 +100,10 @@ class Solver(object):
             self.G.torch.load(
                 '%s/%s_to_%s_model_epoch%s_G.pt' % (self.checkpoint_dir, self.source, self.target, args.resume_epoch))
 
-        self.G.cuda()
-        self.C1.cuda()
-        self.C2.cuda()
+        if torch.cuda.is_available():
+            self.G.cuda()
+            self.C1.cuda()
+            self.C2.cuda()
         self.interval = interval
 
         self.set_optimizer(which_opt=optimizer, lr=learning_rate)
@@ -142,11 +143,13 @@ class Solver(object):
         return torch.mean(torch.abs(F.softmax(out1, dim=1) - F.softmax(out2, dim=1)))
 
     def train(self, epoch, record_file=None):
-        criterion = nn.CrossEntropyLoss().cuda()
+        criterion = nn.CrossEntropyLoss()
+        if torch.cuda.is_available():
+            criterion = criterion.cuda()
+            torch.cuda.manual_seed(1)
         self.G.train()
         self.C1.train()
         self.C2.train()
-        torch.cuda.manual_seed(1)
 
         for batch_idx, data in enumerate(self.datasets):
             img_t = data['T_image']
@@ -154,11 +157,13 @@ class Solver(object):
             label_s = data['S_label']
             if img_s.size()[0] < self.batch_size or img_t.size()[0] < self.batch_size:
                 break
-            img_s = img_s.cuda()
-            img_t = img_t.cuda()
-            imgs = Variable(torch.cat((img_s, \
-                                       img_t), 0))
-            label_s = Variable(label_s.long().cuda())
+    
+            if torch.cuda.is_available():
+                img_s = img_s.cuda()
+                img_t = img_t.cuda()
+                label_s = label_s.cuda()
+            imgs = Variable(torch.cat((img_s, img_t), 0))
+            label_s = Variable(label_s.long())
 
             img_s = Variable(img_s)
             img_t = Variable(img_t)
@@ -216,11 +221,13 @@ class Solver(object):
         return batch_idx
 
     def train_onestep(self, epoch, record_file=None):
-        criterion = nn.CrossEntropyLoss().cuda()
+        criterion = nn.CrossEntropyLoss()
+        if torch.cuda.is_available():
+            criterion = criterion.cuda()
+            torch.cuda.manual_seed(1)
         self.G.train()
         self.C1.train()
         self.C2.train()
-        torch.cuda.manual_seed(1)
 
         for batch_idx, data in enumerate(self.datasets):
             img_t = data['T_image']
@@ -228,9 +235,11 @@ class Solver(object):
             label_s = data['S_label']
             if img_s.size()[0] < self.batch_size or img_t.size()[0] < self.batch_size:
                 break
-            img_s = img_s.cuda()
-            img_t = img_t.cuda()
-            label_s = Variable(label_s.long().cuda())
+            if torch.cuda.is_available():
+                img_s = img_s.cuda()
+                img_t = img_t.cuda()
+                label_s = label_s.cuda()
+            label_s = Variable(label_s.long())
             img_s = Variable(img_s)
             img_t = Variable(img_t)
             self.reset_grad()
@@ -276,7 +285,10 @@ class Solver(object):
             for batch_idx, data in enumerate(self.dataset_test):
                 img = data['T_image']
                 label, label_deg = data['T_label'], data['T_label_deg']
-                img, label, label_deg = img.cuda(), label.long().cuda(), label_deg.float().cuda()
+                label = label.long()
+                label_deg = label_deg.float()
+                if torch.cuda.is_available():
+                    img, label, label_deg = img.cuda(), label.cuda(), label_deg.cuda()
                 with torch.no_grad():
                     img, label, label_deg = Variable(img), Variable(label), Variable(label_deg)
                 feat = self.G(img)
@@ -288,16 +300,18 @@ class Solver(object):
                 pred_val, pred_ind = torch.max(output_ensemble, dim=1)
                 print ('pred_val', pred_val.size())
                 # Get prediction of the one on the right and on the left.
-                predprev_val = output_ensemble[:, (pred_ind-1) % 12]      FIXME: this makes a tensor of 128x128
-                prednext_val = output_ensemble[:, (pred_ind+1) % 12]
-                print ('predprev_val', predprev_val.size())
-                pred_sumval = pred_val + predprev_val + prednext_val
-                # Get weighted prediction.
-                pred_frac = -predprev_val / pred_sumval + prednext_val / pred_sumval
-                pred_deg = (pred_ind.float() + pred_frac - 0.5) * 360. / 12.
-                print ('pred_frac', pred_frac.type(), pred_frac.size(), pred_frac)
-                print ('pred_deg', pred_deg.type(), pred_deg.size(), pred_deg)
-                print ('label_deg', label_deg.type(), label_deg.size())
+                # predprev_val = output_ensemble[:, (pred_ind-1) % 12]      FIXME: this makes a tensor of 128x128
+                # prednext_val = output_ensemble[:, (pred_ind+1) % 12]
+                # print ('predprev_val', predprev_val.size())
+                # pred_sumval = pred_val + predprev_val + prednext_val
+                # # Get weighted prediction.
+                # pred_frac = -predprev_val / pred_sumval + prednext_val / pred_sumval
+                # pred_deg = (pred_ind.float() + pred_frac - 0.5) * 360. / 12.
+                # print ('pred_frac', pred_frac.type(), pred_frac.size(), pred_frac)
+                # print ('pred_deg', pred_deg.type(), pred_deg.size(), pred_deg)
+                # print ('label_deg', label_deg.type(), label_deg.size())
+                pred_deg = pred_val
+
                 # Error.
                 error = torch.min(torch.abs(pred_deg - label_deg),
                                   torch.abs(pred_deg + 360. - label_deg))
@@ -315,7 +329,8 @@ class Solver(object):
             for batch_idx, data in enumerate(self.dataset_test):
                 img = data['T_image']
                 label = data['T_label']
-                img, label = img.cuda(), label.long().cuda()
+                if torch.cuda.is_available():
+                    img, label = img.cuda(), label.long().cuda()
                 with torch.no_grad():
                     img, label = Variable(img), Variable(label)
                 feat = self.G(img)
