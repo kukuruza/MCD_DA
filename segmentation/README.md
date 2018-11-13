@@ -11,14 +11,15 @@ CUDA_VISIBLE_DEVICES=1 && src_split='synthetic-Sept19' && tgt_split='real-Sept23
   --net drn_d_105 --test_img_shape 64 64 --split ${test_split} --add_bg_loss; \
   done
 
-src_split='synthetic-Sept19' && split='real-Sept23-train0.5' && test_split='real-Sept23-test' && subset='test' && basename='batch10' && \
+# Evaluate
+src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && test_split='real-Sept23-test' && basename='batch10-onestep' && \
   for epoch in 1 2 3 4 5 6 7 8 9 10; do \
-  test_output_dir=citycam-${split}_only_3ch---citycam-${test_split}/${basename}-drn_d_105-${epoch}.tar && \
+  test_output_dir=citycam-${src_split}2citycam-${tgt_split}_3ch---citycam-${test_split}/MCD-${basename}-drn_d_105-${epoch}.tar && \
   ${HOME}/projects/shuffler/shuffler.py \
-  -i /home/etoropov/src/MCD_DA/segmentation/test_output/${test_output_dir}/predictedtop.db --rootdir $CITY_PATH \
+  -i ${HOME}/src/MCD_DA/segmentation/test_output/${test_output_dir}/predictedtop.db --rootdir $CITY_PATH \
   evaluateSegmentationIoU \
-  --gt_db_file $CITY_PATH/data/patches/Sept23-real/${subset}.db  \
-  --gt_mapping_dict '{"<10": "background", ">245": "car"}'; \
+  --gt_db_file $CITY_PATH/data/patches/Sept23-real/test.db  \
+  --gt_mapping_dict '{0: "background", 255: "car"}'; \
   done
 ```
 
@@ -36,15 +37,14 @@ CUDA_VISIBLE_DEVICES=1 && split='real-Sept23-train' && test_split='real-Sept23-t
   --test_img_shape 64 64 --split ${test_split}; \
   done
 
-# Evaluate
-src_split='synthetic-Sept19' && tgt_split='real-Sept23-train' && test_split='real-Sept23-test' && subset='test' && basename='batch10-onestep' && \
+split='real-Sept23-train0.5' && test_split='real-Sept23-test' && basename='batch10' && \
   for epoch in 1 2 3 4 5 6 7 8 9 10; do \
-  test_output_dir=citycam-${src_split}2citycam-${tgt_split}_3ch---citycam-${test_split}/MCD-${basename}-drn_d_105-${epoch}.tar && \
+  test_output_dir=citycam-${split}_only_3ch---citycam-${test_split}/${basename}-drn_d_105-${epoch}.tar && \
   ${HOME}/projects/shuffler/shuffler.py \
-  -i /home/etoropov/src/MCD_DA/segmentation/test_output/${test_output_dir}/predictedtop.db --rootdir $CITY_PATH \
+  -i ${HOME}/src/MCD_DA/segmentation/test_output/${test_output_dir}/predictedtop.db --rootdir $CITY_PATH \
   evaluateSegmentationIoU \
-  --gt_db_file $CITY_PATH/data/patches/Sept23-real/${subset}.db  \
-  --gt_mapping_dict '{"<10": "background", ">245": "car"}'; \
+  --gt_db_file $CITY_PATH/data/patches/Sept23-real/test.db  \
+  --gt_mapping_dict '{0: "background", 255: "car"}'; \
   done
 ```
 

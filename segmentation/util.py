@@ -37,6 +37,7 @@ def yes_no_input():
 
 
 def check_if_done(filename):
+    return  # That is annoying and I never use it.
     if os.path.exists(filename):
         print ("%s already exists. Is it O.K. to overwrite it and start this program?" % filename)
         if not yes_no_input():
