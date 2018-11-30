@@ -91,10 +91,9 @@ img_transform = Compose([
     Normalize([.485, .456, .406], [.229, .224, .225]),
 
 ])
-label_transform = Compose([Scale(train_img_shape, Image.BILINEAR), ToTensor()])
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
-                          label_transform=label_transform, test=True, input_ch=train_args.input_ch,
+                          label_transform=None, test=True, input_ch=train_args.input_ch,
                           keys_dict={'image': 'image', 'image_original': 'image_original', 'url': 'url'})
 target_loader = data.DataLoader(tgt_dataset, batch_size=10, pin_memory=True, shuffle=False)
 
