@@ -2,14 +2,16 @@ from __future__ import division
 
 import os
 import logging
+from tqdm import tqdm
 
 import torch
 from PIL import Image
 from tensorboard_logger import configure, log_value
 from torch.autograd import Variable
 from torch.utils import data
+import torch.nn
 from torchvision.transforms import Compose, Normalize, ToTensor
-from tqdm import tqdm
+torch.set_printoptions(linewidth=150)
 
 from argmyparse import get_src_only_training_parser, add_additional_params_to_args, fix_img_shape_args
 from datasets import get_dataset
@@ -103,9 +105,10 @@ label_transform = Compose([
 
 src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
-                          keys_dict={'image': 'image', 'image_original': 'image_original', 'mask': 'label_map', 'url': 'url'})
+                          keys_dict={'image': 'image', 'image_original': 'image_original', 
+                              'mask': 'label_map', 'yaw': 'yaw', 'url': 'url', 'yaw_discr': 'yaw_discr'})
 
-kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
+kwargs = {'num_workers': 5, 'pin_memory': True} if torch.cuda.is_available() else {}
 train_loader = torch.utils.data.DataLoader(src_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
 
 weight = get_class_weight_from_file(n_class=args.n_class, weight_filename=args.loss_weights_file,
@@ -115,43 +118,53 @@ if torch.cuda.is_available():
     model.cuda()
     weight = weight.cuda()
 
-criterion = CrossEntropyLoss2d(weight)
+criterion_map = CrossEntropyLoss2d(weight) # torch.nn.CrossEntropyLoss(weight=weight)
+criterion_yaw = torch.nn.CrossEntropyLoss() # MSELoss()
+if torch.cuda.is_available():
+    criterion_map = criterion_map.cuda()
+    criterion_yaw = criterion_yaw.cuda()
 
 configure(args.tflog_dir, flush_secs=5)
 
 model.train()
 
 for epoch in range(args.epochs):
-    epoch_loss = 0
+    cum_losses = {'count': 0, 'total': 0, 'mask': 0, 'yaw': 0}
     for ind, batch in tqdm(enumerate(train_loader)):
-        images, labels = batch['image'], batch['label_map']
+        imgs, lbls, yaws = batch['image'], batch['label_map'], batch['yaw_discr']
 
-        imgs = Variable(images)
-        lbls = Variable(labels)
+        imgs, lbls, yaws = Variable(imgs), Variable(lbls), Variable(yaws)
         if torch.cuda.is_available():
-            imgs, lbls = imgs.cuda(), lbls.cuda()
+            imgs, lbls, yaws = imgs.cuda(), lbls.cuda(), yaws.cuda()
 
         # update generator and classifiers by source samples
         optimizer.zero_grad()
-        preds = model(imgs)
-        if args.net == "psp":
-            preds = preds[0]
+        preds_mask, preds_yaw = model(imgs)
 
-        loss = criterion(preds, lbls)
+        loss_mask = criterion_map(preds_mask, lbls)
+        loss_yaw = criterion_yaw(preds_yaw, yaws)
+
+        loss = loss_mask # + loss_yaw
         loss.backward()
-        c_loss = loss.data[0]
-        epoch_loss += c_loss
+        cum_losses['count'] += 1
+        cum_losses['total'] += loss.data
+        cum_losses['mask'] += loss_mask.data
+        cum_losses['yaw'] += loss_yaw.data
 
         optimizer.step()
 
-        if ind % 100 == 0:
-            print("iter [%d] CLoss: %.4f" % (ind, c_loss))
+        if ind % 50 == 0:
+            count = cum_losses['count']
+            print (preds_yaw, yaws)
+            print("iter [%d] MapLoss: %.4f, YawLoss: %.4f, Total CLoss: %.4f" %
+                    (ind, cum_losses['mask'] / count, cum_losses['yaw'] / count, cum_losses['total'] / count))
+            cum_losses = {'count': 0, 'total': 0, 'mask': 0, 'yaw': 0}
 
         if args.max_iter is not None and ind > args.max_iter:
             break
 
-    print("Epoch [%d] Loss: %.4f" % (epoch + 1, epoch_loss))
-    log_value('loss', epoch_loss, epoch)
+#    print("Epoch [%d] Loss: %.4f" % (epoch + 1, epoch_loss))
+#    log_value('loss', epoch_loss, epoch)
     log_value('lr', args.lr, epoch)
 
     if args.adjust_lr:

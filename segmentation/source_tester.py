@@ -106,10 +106,7 @@ for index, batch in tqdm(enumerate(target_loader)):
     if torch.cuda.is_available():
         imgs = imgs.cuda()
 
-    preds = model(imgs)
-
-    if train_args.net == "psp":
-        preds = preds[0]
+    preds, yaws = model(imgs)
 
     # Save predicted pixel labels(pngs)
     for path, pred in zip(paths, preds):
@@ -121,7 +118,6 @@ for index, batch in tqdm(enumerate(target_loader)):
             pred = pred[:train_args.n_class - 1].data.cpu()
 
         if args.tgt_dataset == 'citycam':
-            pred = torch.softmax(pred, dim=0)
             # Write the probability.
             prob = pred[0]  # Take the first channel, which is the object.
             mask = np.uint8((prob * 255).numpy())

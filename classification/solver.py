@@ -1,4 +1,5 @@
 from __future__ import print_function
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -87,18 +88,17 @@ class Solver(object):
             self.datasets, self.dataset_test = dataset_read(source, target, self.batch_size, scale=self.scale,
                                                             all_use=self.all_use)
 
-        self.G = Generator(source=source, target=target)
-        print('load finished!')
-        self.C1 = Classifier(source=source, target=target)
-        self.C2 = Classifier(source=source, target=target)
         if args.eval_only:
-            self.G.torch.load(
+            self.G = torch.load(
                 '%s/%s_to_%s_model_epoch%s_G.pt' % (self.checkpoint_dir, self.source, self.target, args.resume_epoch))
-            self.G.torch.load(
-                '%s/%s_to_%s_model_epoch%s_G.pt' % (
-                    self.checkpoint_dir, self.source, self.target, self.checkpoint_dir, args.resume_epoch))
-            self.G.torch.load(
-                '%s/%s_to_%s_model_epoch%s_G.pt' % (self.checkpoint_dir, self.source, self.target, args.resume_epoch))
+            self.C1 = torch.load(
+                '%s/%s_to_%s_model_epoch%s_C1.pt' % (self.checkpoint_dir, self.source, self.target, args.resume_epoch))
+            self.C2 = torch.load(
+                '%s/%s_to_%s_model_epoch%s_C2.pt' % (self.checkpoint_dir, self.source, self.target, args.resume_epoch))
+        else:
+            self.G = Generator(source=source, target=target)
+            self.C1 = Classifier(source=source, target=target)
+            self.C2 = Classifier(source=source, target=target)
 
         if torch.cuda.is_available():
             self.G.cuda()
@@ -151,7 +151,7 @@ class Solver(object):
         self.C1.train()
         self.C2.train()
 
-        for batch_idx, data in enumerate(self.datasets):
+        for batch_idx, data in tqdm(enumerate(self.datasets)):
             img_t = data['T_image']
             img_s = data['S_image']
             label_s = data['S_label']
@@ -249,14 +249,14 @@ class Solver(object):
             loss_s1 = criterion(output_s1, label_s)
             loss_s2 = criterion(output_s2, label_s)
             loss_s = loss_s1 + loss_s2
-            loss_s.backward()#retain_variables=True)
+            loss_s.backward(retain_graph=True)
             feat_t = self.G(img_t)
             self.C1.set_lambda(1.0)
             self.C2.set_lambda(1.0)
             output_t1 = self.C1(feat_t, reverse=True)
             output_t2 = self.C2(feat_t, reverse=True)
             loss_dis = -self.discrepancy(output_t1, output_t2)
-            #loss_dis.backward()
+            loss_dis.backward()
             self.opt_c1.step()
             self.opt_c2.step()
             self.opt_g.step()
@@ -281,6 +281,7 @@ class Solver(object):
         if self.source == 'citycam':
             size = 0
             error_accum = 0.
+            error_top1 = 0.
             test_loss = 0
             for batch_idx, data in enumerate(self.dataset_test):
                 img = data['T_image']
@@ -296,30 +297,28 @@ class Solver(object):
                 output2 = self.C2(feat)
                 test_loss += F.nll_loss(output1, label).data
                 output_ensemble = output1 + output2
-                print ('output_ensemble', output_ensemble.size())
                 pred_val, pred_ind = torch.max(output_ensemble, dim=1)
-                print ('pred_val', pred_val.size())
                 # Get prediction of the one on the right and on the left.
-                # predprev_val = output_ensemble[:, (pred_ind-1) % 12]      FIXME: this makes a tensor of 128x128
-                # prednext_val = output_ensemble[:, (pred_ind+1) % 12]
-                # print ('predprev_val', predprev_val.size())
-                # pred_sumval = pred_val + predprev_val + prednext_val
-                # # Get weighted prediction.
-                # pred_frac = -predprev_val / pred_sumval + prednext_val / pred_sumval
-                # pred_deg = (pred_ind.float() + pred_frac - 0.5) * 360. / 12.
-                # print ('pred_frac', pred_frac.type(), pred_frac.size(), pred_frac)
-                # print ('pred_deg', pred_deg.type(), pred_deg.size(), pred_deg)
-                # print ('label_deg', label_deg.type(), label_deg.size())
-                pred_deg = pred_val
-
+                predprev_val = torch.gather(input=output_ensemble, dim=1,
+                        index=((pred_ind-1) % 12).unsqueeze(1), out=None).squeeze()
+                prednext_val = torch.gather(input=output_ensemble, dim=1,
+                        index=((pred_ind+1) % 12).unsqueeze(1), out=None).squeeze()
+                pred_sumval = pred_val + predprev_val + prednext_val
+                # Get weighted prediction.
+                pred_frac = -predprev_val / pred_sumval + prednext_val / pred_sumval
+                pred_deg = (pred_ind.float() + pred_frac - 0.5) * 360. / 12.
+                #pred_deg = (pred_ind.float() - 0.5) * 360. / 12.
                 # Error.
                 error = torch.min(torch.abs(pred_deg - label_deg),
                                   torch.abs(pred_deg + 360. - label_deg))
                 error_accum += error.sum()[0]
+                error_top1 += torch.sum((label == pred_ind).long())
                 size += label.data.size()[0]
             test_loss /= float(size)
             error_accum /= float(size)
-            print('\nTest set: Average loss: {:.4f}, L1 error: {:.4f}\n'.format(test_loss, error_accum))
+            error_top1 /= float(size)
+            print('\nTest set: Average loss: %.4f, Top1: %.4f, L1 error: %.4f\n' % 
+                    (test_loss, error_top1, error_accum))
         else:
             test_loss = 0
             correct1 = 0

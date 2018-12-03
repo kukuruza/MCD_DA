@@ -103,12 +103,11 @@ class Bottleneck(nn.Module):
 class DRN(nn.Module):
     def __init__(self, block, layers, num_classes=1000,
                  channels=(16, 32, 64, 128, 256, 512, 512, 512),
-                 out_map=False, out_middle=False, pool_size=28, arch='D'):
+                 out_map=False, pool_size=28, arch='D'):
         super(DRN, self).__init__()
         self.inplanes = channels[0]
         self.out_map = out_map
         self.out_dim = channels[-1]
-        self.out_middle = out_middle
         self.arch = arch
 
         if arch == 'C':

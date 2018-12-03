@@ -3,7 +3,7 @@ import glob
 import os
 import os.path as osp
 import logging
-from math import floor
+from math import floor, cos, sin
 
 import numpy as np
 import torch
@@ -216,21 +216,11 @@ class SynthiaDataSet(data.Dataset):
 
 
 class CitycamDataSet(data.Dataset):
-
-    def _onehot_yaw(self, yaw):
-        assert yaw >= 0 and yaw < 360., yaw
-        yaw = yaw / 360. * 12.
-
-        onehot = np.zeros((12,), dtype=float)
-        integral = int(floor(yaw))
-        fraction = yaw - floor(yaw)
-        if fraction < 0.5:
-            onehot[integral] = 1. - fraction
-            onehot[(integral - 1) % 12] = fraction
-        else:
-            onehot[integral] = fraction
-            onehot[(integral + 1) % 12] = 1. - fraction
-        return onehot
+    
+    def _cos_sin_yaw(self, yaw):
+        ''' Get sin and cos from yaw. '''
+        yaw *= (np.pi / 180.)
+        return np.array([cos(yaw), sin(yaw)], dtype=np.float32)
 
     def __init__(self, root, split, img_transform=None, label_transform=None,
                 test=False, input_ch=3, 
@@ -291,19 +281,29 @@ class CitycamDataSet(data.Dataset):
 
         if 'yaw' in self.keys_dict:
             yaw = float(car['yaw'])
-            yaw_discr = int(floor(yaw / 360 * 12 + 0.5)) % 12
-            logging.debug('Yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
+            yaw_discr = int(floor(yaw / 360 * 8 + 0.5)) % 8
+            logging.debug('Yaw %1.f transformed into discr as %s' % (yaw, str(yaw_discr)))
+            if 'yaw_discr' in self.keys_dict:
+              item[self.keys_dict['yaw_discr']] = yaw_discr
+            if 'yaw_cos_sin' in self.keys_dict:
+              yaw_cos_sin = None if yaw is None else self._cos_sin_yaw(yaw)
+              logging.debug('Yaw %1.f transformed into cos-sin as %s' % (yaw, str(yaw_cos_sin)))
+              item[self.keys_dict['yaw_cos_sin']] = yaw_cos_sin
             if 'yaw' in self.keys_dict:
-              item[self.keys_dict['yaw']] = yaw_discr
-            if 'yaw_onehot' in self.keys_dict:
-              item[self.keys_dict['yaw_onehot']] = self._onehot_yaw(yaw)
-            if 'yaw_raw' in self.keys_dict:
-              item[self.keys_dict['yaw_raw']] = yaw % 360
+              item[self.keys_dict['yaw']] = yaw % 360
 
         if 'pitch' in self.keys_dict:
             pitch = float(car['pitch'])
             pitch /= 90.
             item[self.keys_dict['pitch']] = pitch
+
+        if 'name' in self.keys_dict:
+            if car['name'] is None:
+              name = None
+            else:
+              # Terrible hack - hardcode names.
+              name = ['passenger', 'truck', 'bus', 'van'].index(car['name'])
+            item[self.keys_dict['name']] = name
 
         return item
 
