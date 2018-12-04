@@ -291,14 +291,14 @@ class CitycamDataSet(data.Dataset):
 
         if 'yaw' in self.keys_dict:
             yaw = float(car['yaw'])
-            yaw_discr = int(floor(yaw / 360 * 12 + 0.5)) % 12
+            yaw_discr = int(floor(yaw / 360 * 8 + 0.5)) % 8
             logging.debug('Yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
-            if 'yaw' in self.keys_dict:
-              item[self.keys_dict['yaw']] = yaw_discr
+            if 'yaw_discr' in self.keys_dict:
+              item[self.keys_dict['yaw_discr']] = yaw_discr
             if 'yaw_onehot' in self.keys_dict:
               item[self.keys_dict['yaw_onehot']] = self._onehot_yaw(yaw)
-            if 'yaw_raw' in self.keys_dict:
-              item[self.keys_dict['yaw_raw']] = yaw % 360
+            if 'yaw' in self.keys_dict:
+              item[self.keys_dict['yaw']] = yaw % 360
 
         if 'pitch' in self.keys_dict:
             pitch = float(car['pitch'])

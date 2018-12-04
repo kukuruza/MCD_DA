@@ -19,7 +19,9 @@ from PIL import Image
 from torchvision import transforms
 
 import drn
-from models.grad_reversal import grad_reverse
+from grad_reversal import grad_reverse
+from models.classification import Predictor as ClasPredictor
+from models.classification import Feature as ClasFeature
 
 CITYSCAPE_PALLETE = np.asarray([
     [128, 64, 128],
@@ -56,17 +58,43 @@ def fill_up_weights(up):
         w[c, 0, :, :] = w[0, 0, :, :]
 
 
+class BaseWithMiddleOut(nn.Module):
+  ''' Concat intermediate layers into a second output. '''
+
+  def __init__(self, submodules, layers_to_concat):
+    super(BaseWithMiddleOut, self).__init__()
+
+    self.submodules = nn.ModuleList(submodules)
+    self.layers_to_concat = layers_to_concat
+    #print ('Total submodules: %d' % len(submodules))
+
+  def forward(self, x):
+    pyramid = []
+    for isubmodule,submodule in enumerate(self.submodules):
+      x = submodule(x)
+      if isubmodule in self.layers_to_concat:
+        pyramid.append(x)
+      #print ('After submodule %d, shape is %s, total %d pixels.' % (isubmodule, x.size(), x.numel()))
+    pyramid = torch.cat(pyramid, dim=1)
+    #print ('Pyramid has shape', pyramid.size())
+    return x, pyramid
+
+
+
 class DRNSeg(nn.Module):
     def __init__(self, model_name, n_class, input_ch=3, pretrained_model=None,
-                 pretrained=True, use_torch_up=False):
+                 pretrained=True, use_torch_up=False, concat_intermediate_layers=[6, 7, 8]):
         super(DRNSeg, self).__init__()
 
         model = drn.__dict__.get(model_name)(
             pretrained=pretrained, num_classes=1000, input_ch=input_ch)
-        pmodel = nn.DataParallel(model)
-        if pretrained_model is not None:
-            pmodel.load_state_dict(pretrained_model)
-        self.base = nn.Sequential(*list(model.children())[:-2])
+        #pmodel = nn.DataParallel(model)
+        #if pretrained_model is not None:
+        #    pmodel.load_state_dict(pretrained_model)
+        #self.base = nn.Sequential(*list(model.children())[:-2])
+        self.base = BaseWithMiddleOut(list(model.children())[:-2], concat_intermediate_layers)
+        self.clas_feature = ClasFeature()
+        self.clas_predictor = ClasPredictor(n_classes=8)
 
         self.seg = nn.Conv2d(model.out_dim, n_class,
                              kernel_size=1, bias=True)
@@ -83,16 +111,16 @@ class DRNSeg(nn.Module):
                                     bias=False)
             # fill_up_weights(up)
             # up.weight.requires_grad = False  # WHY?
-
             self.up = up
 
     def forward(self, x):
-        x = self.base(x)
+        x, stacked = self.base(x)
         x = self.seg(x)
         y = self.up(x)
-        # return self.softmax(y), x
-        # return self.softmax(y)
-        return y
+        z = self.clas_feature(stacked)
+        z = self.clas_predictor(z)
+        z = F.softmax(z)
+        return y, z
 
     def optim_parameters(self, memo=None):
         for param in self.base.parameters():
