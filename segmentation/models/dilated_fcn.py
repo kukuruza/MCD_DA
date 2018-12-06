@@ -82,9 +82,28 @@ class BaseWithMiddleOut(nn.Module):
 
 
 class DRNSeg(nn.Module):
-    def __init__(self, model_name, n_class, input_ch=3, pretrained_model=None,
+    def __init__(self, model_name, n_class, yaw_loss, input_ch=3, pretrained_model=None,
                  pretrained=True, use_torch_up=False, concat_intermediate_layers=[6, 7, 8]):
         super(DRNSeg, self).__init__()
+        dummy = 1
+        if yaw_loss == 'clas12':
+          clas_out_ch = 12
+          regr_out_ch = dummy
+        elif yaw_loss == 'clas8':
+          clas_out_ch = 8
+          regr_out_ch = dummy
+        elif yaw_loss == 'clas8-regr1':
+          clas_out_ch = 8
+          regr_out_ch = 1
+        elif yaw_loss == 'clas8-regr8':
+          clas_out_ch = 8
+          regr_out_ch = 8
+        elif yaw_loss == 'cos':
+          clas_out_ch = dummy
+          regr_out_ch = 1
+        elif yaw_loss == 'cos-sin':
+          clas_out_ch = dummy
+          regr_out_ch = 2
 
         model = drn.__dict__.get(model_name)(
             pretrained=pretrained, num_classes=1000, input_ch=input_ch)
@@ -94,7 +113,7 @@ class DRNSeg(nn.Module):
         #self.base = nn.Sequential(*list(model.children())[:-2])
         self.base = BaseWithMiddleOut(list(model.children())[:-2], concat_intermediate_layers)
         self.clas_feature = ClasFeature()
-        self.clas_predictor = ClasPredictor(n_classes=8)
+        self.clas_predictor = ClasPredictor(clas_out_ch=clas_out_ch, regr_out_ch=regr_out_ch)
 
         self.seg = nn.Conv2d(model.out_dim, n_class,
                              kernel_size=1, bias=True)
@@ -119,7 +138,6 @@ class DRNSeg(nn.Module):
         y = self.up(x)
         z = self.clas_feature(stacked)
         z = self.clas_predictor(z)
-        z = F.softmax(z)
         return y, z
 
     def optim_parameters(self, memo=None):

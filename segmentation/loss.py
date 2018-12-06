@@ -1,6 +1,117 @@
+from math import pi
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def get_yaw_loss(loss_name, **kwargs):
+  if loss_name == 'clas8-regr8':
+    return Angle360MixedLoss(N=8, weight_frac=kwargs['weight_frac'], regr_per_angle=True)
+  elif loss_name == 'clas8-regr1':
+    return Angle360MixedLoss(N=8, weight_frac=kwargs['weight_frac'], regr_per_angle=False)
+  elif loss_name == 'clas8':
+    return Angle360MixedLoss(N=8, weight_frac=0, regr_per_angle=False)
+  elif loss_name == 'clas12':
+    return Angle360MixedLoss(N=12, weight_frac=0, regr_per_angle=False)
+  elif loss_name == 'cos':
+    return Angle360CosLoss()
+  elif loss_name == 'cos-sin':
+    return Angle360CosSinLoss()
+  else:
+    raise NotImplemented('Yaw loss "%s" is not implemented.' % loss_name)
+
+
+def angle360_l1(inputs, targets):
+#    print('Metrics: pred:', inputs, 'gt:', targets, 'diff:', out)
+    out = torch.abs(inputs - targets)
+    out = torch.min(torch.abs(inputs + 360. - targets), out)
+    out = torch.min(torch.abs(inputs - 360. - targets), out)
+    return out
+
+
+class Angle360CosSinLoss(nn.Module):
+    def __init__(self):
+        super(Angle360CosSinLoss, self).__init__()
+        self.criterion = torch.nn.SmoothL1Loss()
+
+    def forward(self, inputs, targets):
+        targets_sin = torch.sin(targets * pi / 360.)
+        targets_cos = torch.cos(targets * pi / 360.)
+        targets = torch.stack([targets_sin, targets_cos], dim=1)
+        assert isinstance(inputs, tuple), inputs
+        return self.criterion(inputs[1], targets)
+
+    def metrics(self, inputs, targets):
+        assert isinstance(inputs, tuple), inputs
+        angles = torch.atan2(inputs[1][:,0], inputs[1][:,1])
+        return angle360_l1(angles, targets)
+
+
+class Angle360CosLoss(nn.Module):
+    def forward(self, inputs, targets):
+        assert isinstance(inputs, tuple), inputs
+        return (1. - torch.cos(inputs[1] - targets * (pi / 360.))).mean()
+
+    def metrics(self, inputs, targets):
+        assert isinstance(inputs, tuple), inputs
+        return angle360_l1(inputs[1] * 360. / pi, targets)
+
+
+class Angle360MixedLoss(nn.Module):
+
+    def split_int_frac(self, x):
+        x = x / 360.0 * self.N
+        x_int1 = torch.remainder(torch.floor(x + 0.5), self.N).long()
+        x_frac1 = (torch.remainder(x + 0.5, self.N) - 0.5).float() - x_int1.float()
+        use_next = (x_frac1 >= 0).long()
+        use_prev = 1 - use_next
+        x_int2 = torch.remainder((x_int1 - 1) * use_prev + (x_int1 + 1) * use_next, self.N) 
+        x_frac2 = (torch.remainder(x + 0.5, self.N) - 0.5).float() - x_int2.float()
+        return x_int1, x_frac1, x_int2, x_frac2
+
+    def combine_int_frac(self, x):
+        assert isinstance(x, tuple), x
+        x_int = torch.argmax(x[0], dim=1)
+        if self.regr_per_angle:
+          x_frac = torch.diagonal(x[1][:, x_int])
+        else:
+          x_frac = x[1]
+        return torch.remainder((x_int.float() + x_frac) * 360. / self.N, 360.)
+
+    def __init__(self, N, weight_frac, regr_per_angle=False):
+        super(Angle360MixedLoss, self).__init__()
+        self.N = 8
+        self.criterion_int = torch.nn.CrossEntropyLoss()
+        self.criterion_frac = torch.nn.SmoothL1Loss()
+        self.weight_frac = weight_frac
+        self.regr_per_angle = regr_per_angle
+
+    def forward(self, inputs, targets):
+        targets1_int, targets1_frac, targets2_int, targets2_frac = self.split_int_frac(targets)
+
+        assert isinstance(inputs, tuple), inputs
+        loss_int1  = self.criterion_int  (inputs[0], targets1_int)
+        loss_int2  = self.criterion_int  (inputs[0], targets2_int)
+        if self.regr_per_angle:
+            loss_frac1 = self.criterion_frac (torch.diagonal(inputs[1][:,targets1_int]), targets1_frac)
+            loss_frac2 = self.criterion_frac (torch.diagonal(inputs[1][:,targets2_int]), targets2_frac)
+#            print('Yaw:', targets.cpu().numpy()[0],
+#                  'Int:', torch.argmax(inputs[0], dim=1).detach().cpu().numpy()[0],
+#                  'vs gt', targets1_int.cpu().numpy()[0],
+#                  'Frac: ', torch.diagonal(inputs[1][:,targets1_int]).detach().cpu().numpy()[0],
+#                  'vs gt:', targets1_frac.cpu().numpy()[0],
+#                  'loss_int1:', loss_int1.detach().cpu().numpy().tolist(),
+#                  'loss_frac1:', loss_frac1.detach().cpu().numpy().tolist())
+        else:
+            loss_frac1 = self.criterion_frac (inputs[1], targets1_frac)
+            loss_frac2 = self.criterion_frac (inputs[1], targets2_frac)
+        return torch.min(input=(loss_int1 + self.weight_frac * loss_frac1),
+                         other=(loss_int2 + self.weight_frac * loss_frac2))
+
+    def metrics(self, inputs, targets):
+        inputs = self.combine_int_frac(inputs).detach()
+        return angle360_l1(inputs, targets)
 
 
 # Recommend

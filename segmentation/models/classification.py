@@ -31,13 +31,19 @@ class Feature(nn.Module):
 
 
 class Predictor(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, clas_out_ch, regr_out_ch):
         super(Predictor, self).__init__()
         self.fc2 = nn.Linear(3072, 2048)
         self.bn2_fc = nn.BatchNorm1d(2048)
-        self.fc3 = nn.Linear(2048, n_classes)
+        self.fc3 = nn.Linear(2048, clas_out_ch)
         weight_init(self.fc2)
         weight_init(self.fc3)
+
+        self.regr_fc2 = nn.Linear(3072, 2048)
+        self.regr_bn2_fc = nn.BatchNorm1d(2048)
+        self.regr_fc3 = nn.Linear(2048, regr_out_ch)
+        weight_init(self.regr_fc2)
+        weight_init(self.regr_fc3)
 
     def set_lambda(self, lambd):
         self.lambd = lambd
@@ -45,7 +51,11 @@ class Predictor(nn.Module):
     def forward(self, x, reverse=False):
         if reverse:
             x = grad_reverse(x, self.lambd)
-        x = F.relu(self.bn2_fc(self.fc2(x)))
-        x = self.fc3(x)
-        return x
+        y = F.relu(self.bn2_fc(self.fc2(x)))
+        y = self.fc3(y)
+        y = F.softmax(y, dim=1)
+
+        z = F.relu(self.regr_bn2_fc(self.regr_fc2(x)))
+        z = self.regr_fc3(z).squeeze()
+        return y, z
 

@@ -1,10 +1,10 @@
 import torch
 
 
-def get_full_model(net, res, n_class, input_ch):
+def get_full_model(net, n_class, input_ch, **kwargs):
     if net == "fcn":
         from models.fcn import ResFCN
-        return torch.nn.DataParallel(ResFCN(n_class, res, input_ch))
+        return torch.nn.DataParallel(ResFCN(n_class, kwargs['res'], input_ch))
     elif net == "fcnvgg":
         from models.vgg_fcn import FCN8s
         return torch.nn.DataParallel(FCN8s(n_class))
@@ -12,17 +12,17 @@ def get_full_model(net, res, n_class, input_ch):
     elif "drn" in net:
         from models.dilated_fcn import DRNSeg
         assert net in ["drn_c_26", "drn_c_42", "drn_c_58", "drn_d_22", "drn_d_38", "drn_d_54", "drn_d_105"]
-        return torch.nn.DataParallel(DRNSeg(net, n_class, input_ch=input_ch))
+        return torch.nn.DataParallel(DRNSeg(net, n_class, input_ch=input_ch, yaw_loss=kwargs['yaw_loss']))
     else:
         raise NotImplementedError("Only FCN, DRN are supported!")
 
 
-def get_models(net_name, input_ch, n_class, res="50", method="MCD", uses_one_classifier=False, use_ae=False,
-               is_data_parallel=False):
+def get_models(net_name, input_ch, n_class, method="MCD", uses_one_classifier=False, use_ae=False,
+               is_data_parallel=False, **kwargs):
     def get_MCD_model_list():
         if net_name == "fcn":
             from models.fcn import ResBase, ResClassifier
-            model_g = ResBase(n_class, layer=res, input_ch=input_ch)
+            model_g = ResBase(n_class, layer=kwargs['res'], input_ch=input_ch)
             model_f1 = ResClassifier(n_class)
             model_f2 = ResClassifier(n_class)
         elif net_name == "fcnvgg":

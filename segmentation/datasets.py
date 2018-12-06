@@ -217,21 +217,6 @@ class SynthiaDataSet(data.Dataset):
 
 class CitycamDataSet(data.Dataset):
 
-    def _onehot_yaw(self, yaw):
-        assert yaw >= 0 and yaw < 360., yaw
-        yaw = yaw / 360. * 12.
-
-        onehot = np.zeros((12,), dtype=float)
-        integral = int(floor(yaw))
-        fraction = yaw - floor(yaw)
-        if fraction < 0.5:
-            onehot[integral] = 1. - fraction
-            onehot[(integral - 1) % 12] = fraction
-        else:
-            onehot[integral] = fraction
-            onehot[(integral + 1) % 12] = 1. - fraction
-        return onehot
-
     def __init__(self, root, split, img_transform=None, label_transform=None,
                 test=False, input_ch=3, 
                 keys_dict={}):
@@ -291,14 +276,7 @@ class CitycamDataSet(data.Dataset):
 
         if 'yaw' in self.keys_dict:
             yaw = float(car['yaw'])
-            yaw_discr = int(floor(yaw / 360 * 8 + 0.5)) % 8
-            logging.debug('Yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
-            if 'yaw_discr' in self.keys_dict:
-              item[self.keys_dict['yaw_discr']] = yaw_discr
-            if 'yaw_onehot' in self.keys_dict:
-              item[self.keys_dict['yaw_onehot']] = self._onehot_yaw(yaw)
-            if 'yaw' in self.keys_dict:
-              item[self.keys_dict['yaw']] = yaw % 360
+            item[self.keys_dict['yaw']] = yaw % 360
 
         if 'pitch' in self.keys_dict:
             pitch = float(car['pitch'])

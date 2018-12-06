@@ -1,21 +1,24 @@
-from __future__ import division
+#from __future__ import division
 
 import os
 import logging
-from tqdm import tqdm
+from pprint import pprint
+import progressbar
+import numpy as np
 
 import torch
 from PIL import Image
-from tensorboard_logger import configure, log_value
+from tensorboard_logger import configure, log_value, log_histogram
 from torch.autograd import Variable
 from torch.utils import data
 import torch.nn
 from torchvision.transforms import Compose, Normalize, ToTensor
-torch.set_printoptions(linewidth=150)
+torch.set_printoptions(linewidth=150, precision=2)
+torch.set_flush_denormal(True)
 
 from argmyparse import get_src_only_training_parser, add_additional_params_to_args, fix_img_shape_args
 from datasets import get_dataset
-from loss import CrossEntropyLoss2d
+from loss import get_yaw_loss
 from models.model_util import get_optimizer, get_full_model  # check_training
 from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontalFlip, RandomRotation
 from util import check_if_done, save_checkpoint, adjust_learning_rate, emphasize_str, get_class_weight_from_file
@@ -23,6 +26,12 @@ from util import mkdir_if_not_exist, save_dic_to_json
 
 parser = get_src_only_training_parser()
 parser.add_argument('--logging', type=int, choices=[10,20,30,40], default=20)
+parser.add_argument('--weight_frac', type=float, default=0.1,
+    help='regression weight for angle360 loss,')
+parser.add_argument('--freq_log', type=int, default=100,
+    help='how often to print losses and send them to tensorboard,')
+parser.add_argument('--yaw_loss', choices=['clas8', 'clas12', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
+    help='type of loss for yaw.')
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
@@ -57,7 +66,8 @@ if args.resume:
     save_dic_to_json(args.__dict__, json_fn)
 
 else:
-    model = get_full_model(net=args.net, res=args.res, n_class=args.n_class, input_ch=args.input_ch)
+    model = get_full_model(net=args.net, res=args.res, n_class=args.n_class, input_ch=args.input_ch,
+        yaw_loss=args.yaw_loss)
     optimizer = get_optimizer(model.parameters(), opt=args.opt, lr=args.lr, momentum=args.momentum,
                               weight_decay=args.weight_decay)
 
@@ -118,21 +128,31 @@ if torch.cuda.is_available():
     model.cuda()
     weight = weight.cuda()
 
-criterion_map = CrossEntropyLoss2d(weight) # torch.nn.CrossEntropyLoss(weight=weight)
-criterion_yaw = torch.nn.CrossEntropyLoss() # MSELoss()
+criterion_map = torch.nn.CrossEntropyLoss(weight=weight)
+criterion_yaw = get_yaw_loss(args.yaw_loss, weight_frac=args.weight_frac)
 if torch.cuda.is_available():
     criterion_map = criterion_map.cuda()
     criterion_yaw = criterion_yaw.cuda()
 
-configure(args.tflog_dir, flush_secs=5)
+configure(args.tflog_dir, flush_secs=10)
 
 model.train()
 
-for epoch in range(args.epochs):
-    cum_losses = {'count': 0, 'total': 0, 'mask': 0, 'yaw': 0}
-    for ind, batch in tqdm(enumerate(train_loader)):
-        imgs, lbls, yaws = batch['image'], batch['label_map'], batch['yaw_discr']
+log_counter = -1
+cum_losses = {'count': 0, 'loss/total': 0, 'loss/mask': 0, 'loss/yaw': 0, 'metrics/train/yaw': []}
 
+for epoch in range(args.epochs):
+    widgets = [
+        'Epoch %d/%d,' % (epoch, args.epochs),
+        ' ', progressbar.Counter('batch: %(value)d'),
+        ' ', progressbar.Bar(marker=progressbar.RotatingMarker()),
+    ]
+    bar = progressbar.ProgressBar(widgets=widgets, redirect_stdout=True)
+
+    for ind, batch in bar(enumerate(train_loader)):
+        log_counter += 1
+
+        imgs, lbls, yaws = batch['image'], batch['label_map'], batch['yaw'].float()
         imgs, lbls, yaws = Variable(imgs), Variable(lbls), Variable(yaws)
         if torch.cuda.is_available():
             imgs, lbls, yaws = imgs.cuda(), lbls.cuda(), yaws.cuda()
@@ -143,28 +163,38 @@ for epoch in range(args.epochs):
 
         loss_mask = criterion_map(preds_mask, lbls)
         loss_yaw = criterion_yaw(preds_yaw, yaws)
+        metrics_yaw = criterion_yaw.metrics(preds_yaw, yaws)
 
         loss = loss_mask + loss_yaw
         loss.backward()
         cum_losses['count'] += 1
-        cum_losses['total'] += loss.data
-        cum_losses['mask'] += loss_mask.data
-        cum_losses['yaw'] += loss_yaw.data
+        cum_losses['loss/total'] += loss.data.cpu().numpy()
+        cum_losses['loss/mask'] += loss_mask.data.cpu().numpy()
+        cum_losses['loss/yaw'] += loss_yaw.data.cpu().numpy()
+        cum_losses['metrics/train/yaw'] += metrics_yaw.data.cpu().numpy().tolist()
 
         optimizer.step()
 
-        if ind % 50 == 0:
+        if log_counter % args.freq_log == 0:
+            bincounts, bin_edges = np.histogram(np.array(cum_losses['metrics/train/yaw']), bins=24)
+            log_histogram('hist/train/yaw', (bin_edges, bincounts), step=log_counter)  # note the reverse order in the tuple.
+            cum_losses['metrics/train/yaw'] = np.array(cum_losses['metrics/train/yaw']).sum() # Uncomment for a new run of everything. / args.batch_size
             count = cum_losses['count']
-            print (preds_yaw, yaws)
-            print("epoch [%d], iter [%d] MapLoss: %.4f, YawLoss: %.4f, Total CLoss: %.4f" %
-                  (epoch, ind, cum_losses['mask'] / count, cum_losses['yaw'] / count, cum_losses['total'] / count))
-            cum_losses = {'count': 0, 'total': 0, 'mask': 0, 'yaw': 0}
+            for key in ['loss/mask', 'loss/yaw', 'loss/total', 'metrics/train/yaw']:
+                cum_losses[key] /= count
+                log_value(key, cum_losses[key], log_counter)
+            print('epoch [%d], batch [%d]' % (epoch, ind), cum_losses)
+            print('pred yaws')
+            pprint(preds_yaw)
+            print('gt yaws')
+            pprint(yaws)
+            for key in cum_losses:
+                cum_losses[key] = 0
+            cum_losses['metrics/train/yaw'] = []
 
         if args.max_iter is not None and ind > args.max_iter:
             break
 
-#    print("Epoch [%d] Loss: %.4f" % (epoch + 1, epoch_loss))
-#    log_value('loss', epoch_loss, epoch)
     log_value('lr', args.lr, epoch)
 
     if args.adjust_lr:
