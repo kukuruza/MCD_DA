@@ -3,14 +3,15 @@ import json
 import os
 import logging
 from pprint import pprint
+import cv2
+import progressbar
 import numpy as np
-import torch
+
 from PIL import Image
+import torch
 from torch.autograd import Variable
 from torch.utils import data
 from torchvision.transforms import Compose, Normalize, ToTensor
-from tqdm import tqdm
-import cv2
 
 from argmyparse import add_additional_params_to_args, fix_img_shape_args
 from datasets import get_dataset
@@ -42,7 +43,8 @@ if not os.path.exists(args.trained_checkpoint):
 
 checkpoint = torch.load(args.trained_checkpoint)
 train_args = checkpoint['args']  # Load args!
-model = get_full_model(train_args.net, train_args.res, train_args.n_class, train_args.input_ch)
+model = get_full_model(train_args.net, train_args.res, train_args.n_class, train_args.input_ch,
+    yaw_loss=train_args.yaw_loss)
 model.load_state_dict(checkpoint['state_dict'])
 print ("----- train args ------")
 pprint(checkpoint["args"].__dict__, indent=4)
@@ -99,7 +101,10 @@ if args.tgt_dataset == 'citycam':
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predictedtop.db"))
     writer_top = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
 
-for index, batch in tqdm(enumerate(target_loader)):
+widgets = [ progressbar.Counter('batch: %(value)d') ]
+bar = progressbar.ProgressBar(widgets=widgets, redirect_stdout=True)
+
+for ind, batch in bar(enumerate(target_loader)):
     assert 'image' in batch and 'url' in batch, batch.keys()
     imgs, paths = batch['image'], batch['url']
     imgs = Variable(imgs)
@@ -108,10 +113,6 @@ for index, batch in tqdm(enumerate(target_loader)):
 
     preds = model(imgs)
 
-    if train_args.net == "psp":
-        preds = preds[0]
-
-    # Save predicted pixel labels(pngs)
     for path, pred in zip(paths, preds):
         logging.debug('Working on item "%s"' % path)
 
@@ -121,15 +122,17 @@ for index, batch in tqdm(enumerate(target_loader)):
             pred = pred[:train_args.n_class - 1].data.cpu()
 
         if args.tgt_dataset == 'citycam':
-            pred = torch.softmax(pred, dim=0)
+            mask, yaw = pred
+
+            mask = torch.softmax(mask, dim=0)
             # Write the probability.
-            prob = pred[0]  # Take the first channel, which is the object.
+            prob = mask[0]  # Take the first channel, which is the object.
             mask = np.uint8((prob * 255).numpy())
             mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
             writer_prob.addImage(mask=mask, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
             # Write the argmax class
-            argmax_pred = np.argmax(pred.numpy(), axis=0)
-            mask = 255 - np.uint8(argmax_pred * 255)
+            argmax_mask = np.argmax(mask.numpy(), axis=0)
+            mask = 255 - np.uint8(argmax_mask : 255)
             mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
             writer_top.addImage(mask=mask, imagefile=path)
         else:
@@ -137,7 +140,7 @@ for index, batch in tqdm(enumerate(target_loader)):
             mask = Image.fromarray(np.uint8(pred.numpy()))
             mask = mask.resize(test_img_shape, Image.NEAREST)
             label_outdir = os.path.join(base_outdir, "label")
-            if index == 0:
+            if ind == 0:
                 print ("pred label dir: %s" % label_outdir)
             mkdir_if_not_exist(label_outdir)
             label_fn = os.path.join(label_outdir, path.split('/')[-1])

@@ -26,12 +26,6 @@ from util import mkdir_if_not_exist, save_dic_to_json
 
 parser = get_src_only_training_parser()
 parser.add_argument('--logging', type=int, choices=[10,20,30,40], default=20)
-parser.add_argument('--weight_frac', type=float, default=0.1,
-    help='regression weight for angle360 loss,')
-parser.add_argument('--freq_log', type=int, default=100,
-    help='how often to print losses and send them to tensorboard,')
-parser.add_argument('--yaw_loss', choices=['clas8', 'clas12', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
-    help='type of loss for yaw.')
 args = parser.parse_args()
 args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
@@ -129,7 +123,7 @@ if torch.cuda.is_available():
     weight = weight.cuda()
 
 criterion_map = torch.nn.CrossEntropyLoss(weight=weight)
-criterion_yaw = get_yaw_loss(args.yaw_loss, weight_frac=args.weight_frac)
+criterion_yaw = get_yaw_loss(args.yaw_loss, weight_yaw_regr=args.weight_yaw_regr)
 if torch.cuda.is_available():
     criterion_map = criterion_map.cuda()
     criterion_yaw = criterion_yaw.cuda()

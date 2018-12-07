@@ -27,11 +27,14 @@ def get_common_training_parser(parser):
     parser.add_argument('--savename', type=str, default="normal", help="save name(Do NOT use '-')")
     parser.add_argument('--base_outdir', type=str, default='train_output',
                         help="base output dir")
+
     parser.add_argument('--epochs', type=int, default=10,
                         help='number of epochs to train (default: 10)')
     parser.add_argument("--max_iter", type=int, default=5000)  # Iter per epoch
     parser.add_argument("--add_bg_loss", action="store_true",
                         help='whether you add background loss or not')
+    parser.add_argument('--freq_log', type=int, default=100,
+                        help='how often to print losses and send them to tensorboard,')
 
     # ---------- Define Network ---------- #
     parser.add_argument('--net', type=str, default="drn_d_38", help="network structure",
@@ -62,6 +65,10 @@ def get_common_training_parser(parser):
                         help='whether you use data-augmentation or not')
     parser.add_argument('--loss_weights_file', type=str,
                         help="csv file with weights for dfferent classes")
+    parser.add_argument('--yaw_loss', choices=['clas8', 'clas12', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
+                        help='type of loss for yaw.')
+    parser.add_argument('--weight_yaw_regr', type=float, default=0.1,
+                        help='regression weight for angle360 loss,')
 
     # ---------- Input Image Setting ---------- #
     parser.add_argument("--input_ch", type=int, default=3,
