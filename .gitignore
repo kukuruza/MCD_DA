@@ -110,3 +110,5 @@ ENV/
 #
 *.xml
 *.iml
+
+*.swp

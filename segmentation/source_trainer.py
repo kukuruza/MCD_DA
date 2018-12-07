@@ -138,10 +138,10 @@ cum_losses = {'count': 0, 'loss/total': 0, 'loss/mask': 0, 'loss/yaw': 0, 'metri
 for epoch in range(args.epochs):
     widgets = [
         'Epoch %d/%d,' % (epoch, args.epochs),
-        ' ', progressbar.Counter('batch: %(value)d'),
+        ' ', progressbar.Counter('batch: %(value)d/%(max_value)d'),
         ' ', progressbar.Bar(marker=progressbar.RotatingMarker()),
     ]
-    bar = progressbar.ProgressBar(widgets=widgets, redirect_stdout=True)
+    bar = progressbar.ProgressBar(widgets=widgets, max_value=len(train_loader), redirect_stdout=True)
 
     for ind, batch in bar(enumerate(train_loader)):
         log_counter += 1
@@ -186,7 +186,7 @@ for epoch in range(args.epochs):
                 cum_losses[key] = 0
             cum_losses['metrics/train/yaw'] = []
 
-        if args.max_iter is not None and ind > args.max_iter:
+        if args.max_iter is not None and ind >= args.max_iter:
             break
 
     log_value('lr', args.lr, epoch)

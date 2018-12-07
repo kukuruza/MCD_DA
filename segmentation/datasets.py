@@ -274,12 +274,15 @@ class CitycamDataSet(data.Dataset):
                 mask = self.label_transform(mask)
             item[self.keys_dict['mask']] = mask
 
+        if 'objectid' in self.keys_dict:
+            item[self.keys_dict['objectid']] = car['objectid']
+
         if 'yaw' in self.keys_dict:
-            yaw = float(car['yaw'])
+            yaw = car['yaw']
             item[self.keys_dict['yaw']] = yaw % 360
 
         if 'pitch' in self.keys_dict:
-            pitch = float(car['pitch'])
+            pitch = car['pitch']
             pitch /= 90.
             item[self.keys_dict['pitch']] = pitch
 

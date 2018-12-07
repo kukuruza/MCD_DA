@@ -18,6 +18,7 @@ from datasets import get_dataset
 from models.model_util import get_full_model, get_optimizer
 from transform import Scale, ReLabel, ToLabel
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done
+from loss import get_yaw_loss  # To process yaw.
 
 parser = argparse.ArgumentParser(description='Adapt tester for validation data')
 parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "synthia", "2d3d", 'citycam'])
@@ -43,9 +44,13 @@ if not os.path.exists(args.trained_checkpoint):
 
 checkpoint = torch.load(args.trained_checkpoint)
 train_args = checkpoint['args']  # Load args!
-model = get_full_model(train_args.net, train_args.res, train_args.n_class, train_args.input_ch,
+model = get_full_model(train_args.net, train_args.n_class, train_args.input_ch,
     yaw_loss=train_args.yaw_loss)
 model.load_state_dict(checkpoint['state_dict'])
+model.eval()
+if torch.cuda.is_available():
+    model.cuda()
+
 print ("----- train args ------")
 pprint(checkpoint["args"].__dict__, indent=4)
 print ("-" * 50)
@@ -83,14 +88,16 @@ label_transform = Compose([
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=True, input_ch=train_args.input_ch,
-                          keys_dict={'image': 'image', 'image_original': 'image_original', 'url': 'url'})
+                          keys_dict={'image': 'image', 'image_original': 'image_original',
+                                     'url': 'url', 'objectid': 'objectid'})
 
 target_loader = data.DataLoader(tgt_dataset, batch_size=10, pin_memory=True)
 
+# Use it to extract the value of yaw from the prediction.
+criterion_yaw = get_yaw_loss(checkpoint["args"].yaw_loss)
+criterion_yaw.eval()
 if torch.cuda.is_available():
-    model.cuda()
-
-model.eval()
+    criterion_yaw = criterion_yaw.cuda()
 
 if args.tgt_dataset == 'citycam':
     import os, sys
@@ -101,68 +108,44 @@ if args.tgt_dataset == 'citycam':
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predictedtop.db"))
     writer_top = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
 
-widgets = [ progressbar.Counter('batch: %(value)d') ]
-bar = progressbar.ProgressBar(widgets=widgets, redirect_stdout=True)
+widgets = [ progressbar.Counter('Batch: %(value)d/%(max_value)d') ]
+bar = progressbar.ProgressBar(max_value=len(target_loader), widgets=widgets, redirect_stdout=True)
 
 for ind, batch in bar(enumerate(target_loader)):
     assert 'image' in batch and 'url' in batch, batch.keys()
-    imgs, paths = batch['image'], batch['url']
-    imgs = Variable(imgs)
+    imgs, paths, objectids = batch['image'], batch['url'], batch['objectid'].numpy().tolist()
     if torch.cuda.is_available():
         imgs = imgs.cuda()
 
-    preds = model(imgs)
+    preds_mask, preds_yaw = model(imgs)
 
-    for path, pred in zip(paths, preds):
+    # Extract the mask.
+    preds_mask = torch.softmax(preds_mask, dim=1)
+    if train_args.add_bg_loss:
+        preds_mask = preds_mask[:,:train_args.n_class]
+    else:
+        preds_mask = preds_mask[:,:train_args.n_class-1]
+    preds_mask = preds_mask.data.cpu().numpy()
+
+    # Extract the yaw.
+    preds_yaw = criterion_yaw.prediction2angle(preds_yaw)
+    preds_yaw = preds_yaw.data.cpu().numpy()
+
+    for path, objectid, pred_mask, pred_yaw in zip(paths, objectids, preds_mask, preds_yaw):
         logging.debug('Working on item "%s"' % path)
 
-        if train_args.add_bg_loss:
-            pred = pred[:train_args.n_class].data.cpu()
-        else:
-            pred = pred[:train_args.n_class - 1].data.cpu()
+        # Write the probability.
+        prob = pred_mask[0]  # Take the first channel, which is the object.
+        prob = np.uint8(prob * 255)
+        prob = cv2.resize(prob, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
+        writer_prob.addImage(mask=prob, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
+        writer_prob.addObject({'objectid': objectid, 'yaw': pred_yaw, 'imagefile': path})
+        # Write the argmax class
+        argmax_mask = np.argmax(pred_mask, axis=0)
+        pred_mask = 255 - np.uint8(argmax_mask * 255)
+        pred_mask = cv2.resize(pred_mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
+        writer_top.addImage(mask=pred_mask, imagefile=path)
+        writer_top.addObject({'objectid': objectid, 'yaw': pred_yaw, 'imagefile': path})
 
-        if args.tgt_dataset == 'citycam':
-            mask, yaw = pred
-
-            mask = torch.softmax(mask, dim=0)
-            # Write the probability.
-            prob = mask[0]  # Take the first channel, which is the object.
-            mask = np.uint8((prob * 255).numpy())
-            mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
-            writer_prob.addImage(mask=mask, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
-            # Write the argmax class
-            argmax_mask = np.argmax(mask.numpy(), axis=0)
-            mask = 255 - np.uint8(argmax_mask : 255)
-            mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
-            writer_top.addImage(mask=mask, imagefile=path)
-        else:
-            argmax_pred = pred.max(0)[1]
-            mask = Image.fromarray(np.uint8(pred.numpy()))
-            mask = mask.resize(test_img_shape, Image.NEAREST)
-            label_outdir = os.path.join(base_outdir, "label")
-            if ind == 0:
-                print ("pred label dir: %s" % label_outdir)
-            mkdir_if_not_exist(label_outdir)
-            label_fn = os.path.join(label_outdir, path.split('/')[-1])
-            mask.save(label_fn)
-
-            #  Save visualized predicted pixel labels(pngs)
-            if args.tgt_dataset in ["city16", "synthia"]:
-                info_json_fn = "./dataset/synthia2cityscapes_info.json"
-            else:
-                info_json_fn = "./dataset/city_info.json"
-
-            # Save visualized predicted pixel labels(pngs)
-            with open(info_json_fn) as f:
-                city_info_dic = json.load(f)
-
-            palette = np.array(city_info_dic['palette'], dtype=np.uint8)
-            mask.putpalette(palette.flatten())
-            vis_outdir = os.path.join(base_outdir, "vis")
-            mkdir_if_not_exist(vis_outdir)
-            vis_fn = os.path.join(vis_outdir, path.split('/')[-1])
-            mask.save(vis_fn)
-
-if args.tgt_dataset == 'citycam':
-    writer_prob.close()
-    writer_top.close()
+writer_prob.close()
+writer_top.close()
