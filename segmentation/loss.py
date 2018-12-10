@@ -7,13 +7,15 @@ import torch.nn.functional as F
 
 def get_yaw_loss(loss_name, **kwargs):
   if loss_name == 'clas8-regr8':
-    return Angle360MixedLoss(N=8, weight_yaw_regr=kwargs['weight_yaw_regr'], regr_per_angle=True)
+    return Angle360MixedLoss(N=8, regr_per_angle=True,
+        weight_yaw_regr=kwargs['weight_yaw_regr'] if 'weight_yaw_regr' in kwargs else 1.)
   elif loss_name == 'clas8-regr1':
-    return Angle360MixedLoss(N=8, weight_yaw_regr=kwargs['weight_yaw_regr'], regr_per_angle=False)
+    return Angle360MixedLoss(N=8, regr_per_angle=False,
+        weight_yaw_regr=kwargs['weight_yaw_regr'] if 'weight_yaw_regr' in kwargs else 1.)
   elif loss_name == 'clas8':
-    return Angle360MixedLoss(N=8, weight_yaw_regr=0, regr_per_angle=False)
+    return Angle360MixedLoss(N=8, regr_per_angle=False, weight_yaw_regr=0)
   elif loss_name == 'clas12':
-    return Angle360MixedLoss(N=12, weight_yaw_regr=0, regr_per_angle=False)
+    return Angle360MixedLoss(N=12, regr_per_angle=False, weight_yaw_regr=0)
   elif loss_name == 'cos':
     return Angle360CosLoss()
   elif loss_name == 'cos-sin':
@@ -35,10 +37,8 @@ class Angle360Loss(nn.Module):
   @staticmethod
   def angle360_l1(inputs, targets):
 #    print('Metrics: pred:', inputs, 'gt:', targets, 'diff:', out)
-      out = torch.abs(inputs - targets)
-      out = torch.min(torch.abs(inputs + 360. - targets), out)
-      out = torch.min(torch.abs(inputs - 360. - targets), out)
-      return out
+      diff = torch.remainder(inputs - targets, 360.)
+      return torch.min(diff, 360. - diff)
 
 
 class Angle360CosSinLoss(Angle360Loss):
