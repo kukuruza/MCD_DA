@@ -1,4 +1,4 @@
-#from __future__ import division
+from __future__ import division
 
 import os
 import logging
@@ -6,23 +6,24 @@ from pprint import pprint
 import progressbar
 import numpy as np
 
-import torch
 from PIL import Image
-from tensorboard_logger import configure, log_value, log_histogram
+import torch
 from torch.autograd import Variable
 from torch.utils import data
 import torch.nn
 from torchvision.transforms import Compose, Normalize, ToTensor
 torch.set_printoptions(linewidth=150, precision=2)
 torch.set_flush_denormal(True)
+from tensorboard_logger import configure as tfconfigure, log_value, log_histogram
 
 from argmyparse import get_src_only_training_parser, add_additional_params_to_args, fix_img_shape_args
 from datasets import get_dataset
 from loss import get_yaw_loss
-from models.model_util import get_optimizer, get_full_model  # check_training
+from models.model_util import get_optimizer, get_full_model
 from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontalFlip, RandomRotation
 from util import check_if_done, save_checkpoint, adjust_learning_rate, emphasize_str, get_class_weight_from_file
 from util import mkdir_if_not_exist, save_dic_to_json
+from util import AccumulatedTFLogger
 
 parser = get_src_only_training_parser()
 parser.add_argument('--logging', type=int, choices=[10,20,30,40], default=20)
@@ -110,7 +111,7 @@ label_transform = Compose([
 src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
                           keys_dict={'image': 'image', 'image_original': 'image_original', 
-                              'mask': 'label_map', 'yaw': 'yaw', 'url': 'url', 'yaw_discr': 'yaw_discr'})
+                              'mask': 'mask', 'yaw': 'yaw', 'url': 'url'})
 
 kwargs = {'num_workers': 5, 'pin_memory': True} if torch.cuda.is_available() else {}
 train_loader = torch.utils.data.DataLoader(src_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -121,76 +122,61 @@ weight = get_class_weight_from_file(n_class=args.n_class, weight_filename=args.l
 if torch.cuda.is_available():
     model.cuda()
     weight = weight.cuda()
-
-criterion_map = torch.nn.CrossEntropyLoss(weight=weight)
-criterion_yaw = get_yaw_loss(args.yaw_loss, weight_yaw_regr=args.weight_yaw_regr)
-if torch.cuda.is_available():
-    criterion_map = criterion_map.cuda()
-    criterion_yaw = criterion_yaw.cuda()
-
-configure(args.tflog_dir, flush_secs=10)
-
 model.train()
 
-log_counter = -1
-cum_losses = {'count': 0, 'loss/total': 0, 'loss/mask': 0, 'loss/yaw': 0, 'metrics/train/yaw': []}
+criterion_mask = torch.nn.CrossEntropyLoss(weight=weight)
+criterion_yaw = get_yaw_loss(args.yaw_loss)
+if torch.cuda.is_available():
+    criterion_mask = criterion_mask.cuda()
+    criterion_yaw = criterion_yaw.cuda()
+
+tfconfigure(args.tflog_dir, flush_secs=10)
+print ('Will write tflogs to %s' % os.path.abspath(args.tflog_dir))
+tflogger = AccumulatedTFLogger()
+log_counter = 0
 
 for epoch in range(args.epochs):
     widgets = [
         'Epoch %d/%d,' % (epoch, args.epochs),
-        ' ', progressbar.Counter('batch: %(value)d/%(max_value)d'),
-        ' ', progressbar.Bar(marker=progressbar.RotatingMarker()),
+        ' ', progressbar.Counter('batch: %(value)d/%(max_value)d')
     ]
     bar = progressbar.ProgressBar(widgets=widgets, max_value=len(train_loader), redirect_stdout=True)
 
-    for ind, batch in bar(enumerate(train_loader)):
+    for ibatch, batch in bar(enumerate(train_loader)):
         log_counter += 1
 
-        imgs, lbls, yaws = batch['image'], batch['label_map'], batch['yaw'].float()
-        imgs, lbls, yaws = Variable(imgs), Variable(lbls), Variable(yaws)
+        imgs, gt_masks, gt_yaws = batch['image'], batch['mask'], batch['yaw'].float()
+        imgs, gt_masks, gt_yaws = Variable(imgs), Variable(gt_masks), Variable(gt_yaws)
         if torch.cuda.is_available():
-            imgs, lbls, yaws = imgs.cuda(), lbls.cuda(), yaws.cuda()
+            imgs, gt_masks, gt_yaws = imgs.cuda(), gt_masks.cuda(), gt_yaws.cuda()
 
         # update generator and classifiers by source samples
         optimizer.zero_grad()
-        preds_mask, preds_yaw = model(imgs)
-
-        loss_mask = criterion_map(preds_mask, lbls)
-        loss_yaw = criterion_yaw(preds_yaw, yaws)
-        metrics_yaw = criterion_yaw.metrics(preds_yaw, yaws)
+        pred_masks, pred_yaws = model(imgs)
+        
+        loss_mask = criterion_mask(pred_masks, gt_masks)
+        loss_yaw = criterion_yaw(pred_yaws, gt_yaws)
+        metrics_yaw = criterion_yaw.metrics(pred_yaws, gt_yaws)
 
         loss = loss_mask + loss_yaw
         loss.backward()
-        cum_losses['count'] += 1
-        cum_losses['loss/total'] += loss.data.cpu().numpy()
-        cum_losses['loss/mask'] += loss_mask.data.cpu().numpy()
-        cum_losses['loss/yaw'] += loss_yaw.data.cpu().numpy()
-        cum_losses['metrics/train/yaw'] += metrics_yaw.data.cpu().numpy().tolist()
+        tflogger.acc_value('train/loss/total', loss / args.batch_size)
+        tflogger.acc_value('train/loss/mask', loss_mask / args.batch_size)
+        tflogger.acc_value('train/loss/yaw', loss_yaw / args.batch_size)
+        tflogger.acc_value('train/metrics/yaw', metrics_yaw.mean())
+        tflogger.acc_histogram('train/hist/yaw', metrics_yaw)
 
         optimizer.step()
 
         if log_counter % args.freq_log == 0:
-            bincounts, bin_edges = np.histogram(np.array(cum_losses['metrics/train/yaw']), bins=24)
-            log_histogram('hist/train/yaw', (bin_edges, bincounts), step=log_counter)  # note the reverse order in the tuple.
-            cum_losses['metrics/train/yaw'] = np.array(cum_losses['metrics/train/yaw']).sum() # Uncomment for a new run of everything. / args.batch_size
-            count = cum_losses['count']
-            for key in ['loss/mask', 'loss/yaw', 'loss/total', 'metrics/train/yaw']:
-                cum_losses[key] /= count
-                log_value(key, cum_losses[key], log_counter)
-            print('epoch [%d], batch [%d]' % (epoch, ind), cum_losses)
-            print('pred yaws')
-            pprint(preds_yaw)
-            print('gt yaws')
-            pprint(yaws)
-            for key in cum_losses:
-                cum_losses[key] = 0
-            cum_losses['metrics/train/yaw'] = []
+            print 'Epoch %d/%d, batch %d/%d' % \
+                (epoch, args.epochs, ibatch, len(train_loader)), tflogger.get_mean_values()
+            tflogger.flush (step=log_counter-1)
 
-        if args.max_iter is not None and ind >= args.max_iter:
+        if args.max_iter is not None and ibatch >= args.max_iter:
             break
 
     log_value('lr', args.lr, epoch)
-
     if args.adjust_lr:
         args.lr = adjust_learning_rate(optimizer, args.lr, args.weight_decay, epoch, args.epochs)
 

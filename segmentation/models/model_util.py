@@ -34,13 +34,13 @@ def get_models(net_name, input_ch, n_class, method="MCD", uses_one_classifier=Fa
             from models.dilated_fcn import DRNSegBase, DRNSegPixelClassifier_ADR
             if uses_one_classifier:
                 model_g = DRNSegBase(model_name=net_name, n_class=n_class, input_ch=input_ch)
-                model_f1 = DRNSegPixelClassifier_ADR(n_class=n_class)
-                model_f2 = DRNSegPixelClassifier_ADR(n_class=n_class)
+                model_f1 = DRNSegPixelClassifier_ADR(n_class=n_class, yaw_loss=kwargs['yaw_loss'])
+                model_f2 = DRNSegPixelClassifier_ADR(n_class=n_class, yaw_loss=kwargs['yaw_loss'])
             else:
                 from models.dilated_fcn import DRNSegBase, DRNSegPixelClassifier
                 model_g = DRNSegBase(model_name=net_name, n_class=n_class, input_ch=input_ch)
-                model_f1 = DRNSegPixelClassifier(n_class=n_class)
-                model_f2 = DRNSegPixelClassifier(n_class=n_class)
+                model_f1 = DRNSegPixelClassifier(n_class=n_class, yaw_loss=kwargs['yaw_loss'])
+                model_f2 = DRNSegPixelClassifier(n_class=n_class, yaw_loss=kwargs['yaw_loss'])
 
         else:
             raise NotImplementedError("Only FCN (Including Dilated FCN), SegNet, PSPNetare supported!")

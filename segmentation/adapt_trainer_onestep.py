@@ -1,21 +1,25 @@
 from __future__ import division
 
 import os
+import progressbar
+import numpy as np
+from pprint import pprint
 
-import torch
-import tqdm
 from PIL import Image
-from tensorboard_logger import configure, log_value
+import torch
 from torch.autograd import Variable
 from torch.utils import data
 from torchvision.transforms import Compose, Normalize, ToTensor
+from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontalFlip, RandomRotation
+from tensorboard_logger import configure as tfconfigure, log_value, log_histogram
+
 from argmyparse import add_additional_params_to_args, fix_img_shape_args, get_da_mcd_training_parser
 from datasets import ConcatDataset, get_dataset, check_src_tgt_ok
-from loss import CrossEntropyLoss2d, get_prob_distance_criterion
+from loss import get_yaw_loss, get_prob_distance_criterion
 from models.model_util import get_models, get_optimizer
-from transform import ReLabel, ToLabel, Scale, RandomSizedCrop, RandomHorizontalFlip, RandomRotation
-from util import mkdir_if_not_exist, save_dic_to_json, check_if_done, save_checkpoint, adjust_learning_rate, \
-    get_class_weight_from_file #, set_debugger_org_frc
+from util import mkdir_if_not_exist, save_dic_to_json, check_if_done, save_checkpoint
+from util import adjust_learning_rate, get_class_weight_from_file
+from util import AccumulatedTFLogger
 
 # from visualize import LinePlotter
 #set_debugger_org_frc()
@@ -25,36 +29,22 @@ args = add_additional_params_to_args(args)
 args = fix_img_shape_args(args)
 check_src_tgt_ok(args.src_dataset, args.tgt_dataset)
 
-weight = torch.ones(args.n_class)
+model_g, model_f1, model_f2 = get_models(
+    net_name=args.net, res=args.res, input_ch=args.input_ch, n_class=args.n_class,
+    method=args.method, uses_one_classifier=args.uses_one_classifier,
+    is_data_parallel=args.is_data_parallel, yaw_loss=args.yaw_loss)
 
-if not args.add_bg_loss:
-    weight[args.n_class - 1] = 0  # Ignore background loss
+optimizer_g = get_optimizer(model_g.parameters(),
+    lr=args.lr, momentum=args.momentum, opt=args.opt, weight_decay=args.weight_decay)
+optimizer_f = get_optimizer(list(model_f1.parameters()) + list(model_f2.parameters()),
+    lr=args.lr, momentum=args.momentum, opt=args.opt, weight_decay=args.weight_decay)
 
-args.start_epoch = 0
-resume_flg = True if args.resume else False
-start_epoch = 0
 if args.resume:
-    print("=> loading checkpoint '{}'".format(args.resume))
+    print('Loading checkpoint %s' % args.resume)
     if not os.path.exists(args.resume):
         raise OSError("%s does not exist!" % args.resume)
 
-    indir, infn = os.path.split(args.resume)
-
-    old_savename = args.savename
-    args.savename = infn.split("-")[0]
-    print ("savename is %s (original savename %s was overwritten)" % (args.savename, old_savename))
-
     checkpoint = torch.load(args.resume)
-    start_epoch = checkpoint["epoch"]
-    args = checkpoint['args']
-    # -------------------------------------- #
-    model_g, model_f1, model_f2 = get_models(net_name=args.net, res=args.res, input_ch=args.input_ch,
-                                             n_class=args.n_class, method=args.method,
-                                             is_data_parallel=args.is_data_parallel)
-    optimizer_g = get_optimizer(model_g.parameters(), lr=args.lr, momentum=args.momentum, opt=args.opt,
-                                weight_decay=args.weight_decay)
-    optimizer_f = get_optimizer(list(model_f1.parameters()) + list(model_f2.parameters()), lr=args.lr, opt=args.opt,
-                                momentum=args.momentum, weight_decay=args.weight_decay)
 
     model_g.load_state_dict(checkpoint['g_state_dict'])
     model_f1.load_state_dict(checkpoint['f1_state_dict'])
@@ -62,28 +52,28 @@ if args.resume:
         model_f2.load_state_dict(checkpoint['f2_state_dict'])
     optimizer_g.load_state_dict(checkpoint['optimizer_g'])
     optimizer_f.load_state_dict(checkpoint['optimizer_f'])
-    print("=> loaded checkpoint '{}'".format(args.resume))
-
+    if torch.cuda.is_available():
+        for optimizer in [optimizer_g, optimizer_f]:  # https://github.com/pytorch/pytorch/issues/2830
+            for state in optimizer.state.values():
+                for k, v in state.items():
+                    if torch.is_tensor(v):
+                        state[k] = v.cuda()
+    print('Loaded checkpoint.')
+    start_epoch = checkpoint["epoch"]
 else:
-    model_g, model_f1, model_f2 = get_models(net_name=args.net, res=args.res, input_ch=args.input_ch,
-                                             n_class=args.n_class,
-                                             method=args.method, uses_one_classifier=args.uses_one_classifier,
-                                             is_data_parallel=args.is_data_parallel)
-    optimizer_g = get_optimizer(model_g.parameters(), lr=args.lr, momentum=args.momentum, opt=args.opt,
-                                weight_decay=args.weight_decay)
-    optimizer_f = get_optimizer(list(model_f1.parameters()) + list(model_f2.parameters()), opt=args.opt,
-                                lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    start_epoch = 0
+
 if args.uses_one_classifier:
     print ("f1 and f2 are same!")
     model_f2 = model_f1
 
 mode = "%s-%s2%s-%s_%sch" % (args.src_dataset, args.src_split, args.tgt_dataset, args.tgt_split, args.input_ch)
+outdir = os.path.join(args.base_outdir, mode)
+
 if args.net in ["fcn", "psp"]:
     model_name = "%s-%s-%s-res%s" % (args.method, args.savename, args.net, args.res)
 else:
     model_name = "%s-%s-%s" % (args.method, args.savename, args.net)
-
-outdir = os.path.join(args.base_outdir, mode)
 
 # Create Model Dir
 pth_dir = os.path.join(outdir, "pth")
@@ -92,11 +82,12 @@ mkdir_if_not_exist(pth_dir)
 # Create Model Dir and  Set TF-Logger
 tflog_dir = os.path.join(outdir, "tflog", model_name)
 mkdir_if_not_exist(tflog_dir)
-configure(tflog_dir, flush_secs=5)
+tfconfigure(tflog_dir, flush_secs=5)
+tflogger = AccumulatedTFLogger()
 
 # Save param dic
-if resume_flg:
-    json_fn = os.path.join(args.outdir, "param-%s_resume.json" % model_name)
+if args.resume:
+    json_fn = os.path.join(outdir, "param-%s_resume.json" % model_name)
 else:
     json_fn = os.path.join(outdir, "param-%s.json" % model_name)
 check_if_done(json_fn)
@@ -127,7 +118,7 @@ label_transform = Compose([
 
 src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.src_split, img_transform=img_transform,
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
-                          keys_dict={'image': 'S_image', 'mask': 'S_label_map'})
+                          keys_dict={'image': 'S_image', 'mask': 'S_mask', 'yaw': 'S_yaw'})
 
 tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.tgt_split, img_transform=img_transform,
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
@@ -147,70 +138,94 @@ if torch.cuda.is_available():
     model_f2.cuda()
     weight = weight.cuda()
 
-criterion = CrossEntropyLoss2d(weight)
+criterion_mask = torch.nn.CrossEntropyLoss(weight=weight)
+criterion_yaw = get_yaw_loss(args.yaw_loss)
 criterion_d = get_prob_distance_criterion(args.d_loss)
+if torch.cuda.is_available():
+    criterion_mask = criterion_mask.cuda()
+    criterion_yaw = criterion_yaw.cuda()
+    criterion_d = criterion_d.cuda()
 
 model_g.train()
 model_f1.train()
 model_f2.train()
+
+log_counter = 0
+
+print ('Will train from epoch %d to epoch %d (exclusively)' % (start_epoch, args.epochs))
 for epoch in range(start_epoch, args.epochs):
-    d_loss_per_epoch = 0
-    c_loss_per_epoch = 0
-    interpolate = max(0, min(1 - epoch / 20., 0.8))
-    for ind, batch in tqdm.tqdm(enumerate(train_loader)):
-        src_imgs, src_lbls = Variable(batch['S_image']), Variable(batch['S_label_map'])
-        tgt_imgs = Variable(batch['T_image'])
+    widgets = [
+        'Epoch %d/%d,' % (epoch, args.epochs),
+        ' ', progressbar.Counter('batch: %(value)d/%(max_value)d')
+    ]
+    bar = progressbar.ProgressBar(widgets=widgets, max_value=len(train_loader), redirect_stdout=True)
+
+    for ibatch, batch in bar(enumerate(train_loader)):
+
+        src_imgs, src_masks, src_yaws = batch['S_image'], batch['S_mask'], batch['S_yaw'].float()
+        src_imgs, src_masks, src_yaws = Variable(src_imgs), Variable(src_masks), Variable(src_yaws)
+        tgt_imgs = batch['T_image']
+        tgt_imgs = Variable(tgt_imgs)
 
         if torch.cuda.is_available():
-            src_imgs, src_lbls, tgt_imgs = src_imgs.cuda(), src_lbls.cuda(), tgt_imgs.cuda()
+            src_imgs, src_masks, src_yaws = src_imgs.cuda(), src_masks.cuda(), src_yaws.cuda()
+            tgt_imgs = tgt_imgs.cuda()
 
         # update generator and classifiers by source samples
         optimizer_g.zero_grad()
         optimizer_f.zero_grad()
-        loss = 0
-        d_loss = 0
-        imgs = torch.cat((src_imgs, tgt_imgs), 0)
-        outputs = model_g(src_imgs)
-
-        outputs1 = model_f1(outputs)
-        outputs2 = model_f2(outputs)
-
-        c_loss = criterion(outputs1, src_lbls)
-        c_loss += criterion(outputs2, src_lbls)
+        features = model_g(src_imgs)
+        pred_masks1, pred_yaws1 = model_f1(features)
+        pred_masks2, pred_yaws2 = model_f2(features)
+        c_loss_mask  = criterion_mask(pred_masks1, src_masks)
+        c_loss_mask += criterion_mask(pred_masks2, src_masks)
+        c_loss_mask /= 2.
+        c_loss_yaw  = criterion_yaw(pred_yaws1, src_yaws)
+        c_loss_yaw += criterion_yaw(pred_yaws2, src_yaws)
+        c_loss_yaw /= 2.
+        c_metrics_yaw1 = criterion_yaw.metrics(pred_yaws1, src_yaws)
+        c_metrics_yaw2 = criterion_yaw.metrics(pred_yaws2, src_yaws)
+        c_loss = c_loss_mask + c_loss_yaw
         c_loss.backward(retain_graph=True)
+        tflogger.acc_value('train/loss/src', c_loss / args.batch_size)
+        tflogger.acc_value('train/loss/mask', c_loss_mask / args.batch_size)
+        tflogger.acc_value('train/loss/yaw', c_loss_yaw / args.batch_size)
+        tflogger.acc_value('train/metrics/yaw1', c_metrics_yaw1.mean())
+        tflogger.acc_value('train/metrics/yaw2', c_metrics_yaw2.mean())
+        tflogger.acc_value('train/metrics/yaw', ((c_metrics_yaw1 + c_metrics_yaw2) / 2.).mean())
+        tflogger.acc_histogram('train/hist/yaw1', c_metrics_yaw1)
+        tflogger.acc_histogram('train/hist/yaw2', c_metrics_yaw2)
+
         lambd = 1.0
         model_f1.set_lambda(lambd)
         model_f2.set_lambda(lambd)
-        outputs = model_g(tgt_imgs)
-        outputs1 = model_f1(outputs, reverse=True)
-        outputs2 = model_f2(outputs, reverse=True)
-        loss = - criterion_d(outputs1, outputs2)
-        loss.backward()
+        features = model_g(tgt_imgs)
+        pred_masks1, pred_yaws1 = model_f1(features, reverse=True)
+        pred_masks2, pred_yaws2 = model_f2(features, reverse=True)
+        d_loss = -criterion_d(pred_masks1, pred_masks2)
+        d_loss -= criterion_d(pred_yaws1[0], pred_yaws2[0])  # Only classification.
+        d_loss.backward()
+        tflogger.acc_value('train/loss/discr', d_loss / args.batch_size)
+
         optimizer_f.step()
         optimizer_g.step()
 
-        d_loss = -loss.data[0]
-        d_loss_per_epoch += d_loss
-        c_loss = c_loss.data[0]
-        c_loss_per_epoch += c_loss
-        if ind % 100 == 0:
-            print("iter [%d] DLoss: %.6f CLoss: %.4f Lambd: %.4f" % (ind, d_loss, c_loss, lambd))
+        if log_counter % args.freq_log == 0 and log_counter > 0:
+            print 'Epoch %d/%d, batch %d/%d' % \
+                (epoch, args.epochs, ibatch, len(train_loader)), tflogger.get_mean_values()
+            tflogger.flush (step=log_counter)
+        log_counter += 1
 
-        if args.max_iter is not None and ind > args.max_iter:
+        if args.max_iter is not None and ibatch > args.max_iter:
             break
 
-    print("Epoch [%d] DLoss: %.4f CLoss: %.4f" % (epoch, d_loss_per_epoch, c_loss_per_epoch))
-
-    log_value('c_loss', c_loss_per_epoch, epoch)
-    log_value('d_loss', d_loss_per_epoch, epoch)
     log_value('lr', args.lr, epoch)
-
     if args.adjust_lr:
         args.lr = adjust_learning_rate(optimizer_g, args.lr, args.weight_decay, epoch, args.epochs)
         args.lr = adjust_learning_rate(optimizer_f, args.lr, args.weight_decay, epoch, args.epochs)
 
     checkpoint_fn = os.path.join(pth_dir, "%s-%s.pth.tar" % (model_name, epoch + 1))
-    args.start_epoch = epoch + 1
+    start_epoch = epoch + 1
     save_dic = {
         'epoch': epoch + 1,
         'args': args,

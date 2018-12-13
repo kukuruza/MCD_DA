@@ -175,7 +175,7 @@ class Diff2d(nn.Module):
         self.weight = weight
 
     def forward(self, inputs1, inputs2):
-        return torch.mean(torch.abs(F.softmax(inputs1) - F.softmax(inputs2)))
+        return torch.mean(torch.abs(F.softmax(inputs1, dim=1) - F.softmax(inputs2, dim=1)))
 
 class Symkl2d(nn.Module):
     def __init__(self, weight=None, n_target_ch=21, size_average=True):

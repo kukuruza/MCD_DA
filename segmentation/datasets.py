@@ -4,6 +4,7 @@ import os
 import os.path as osp
 import logging
 from math import floor
+from pprint import pprint
 
 import numpy as np
 import torch
@@ -278,14 +279,16 @@ class CitycamDataSet(data.Dataset):
             item[self.keys_dict['objectid']] = car['objectid']
 
         if 'yaw' in self.keys_dict:
-            yaw = car['yaw']
-            item[self.keys_dict['yaw']] = yaw % 360
+            yaw = float(car['yaw'])
+            yaw %= 360.
+            item[self.keys_dict['yaw']] = yaw
 
         if 'pitch' in self.keys_dict:
-            pitch = car['pitch']
+            pitch = float(car['pitch'])
             pitch /= 90.
             item[self.keys_dict['pitch']] = pitch
 
+        #pprint(item)
         return item
 
     def __len__(self):

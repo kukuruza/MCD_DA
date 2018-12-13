@@ -4,6 +4,52 @@ import shutil
 
 import torch
 import sys
+import numpy as np
+from tensorboard_logger import log_value, log_histogram
+
+
+class AccumulatedTFLogger:
+  ''' A wrapper around tesorboard_logger.
+  It logs the mean values and the distribution of values.
+  '''
+  def __init__(self):
+    self.vals = {}
+    self.hist = {}
+
+  def acc_value(self, key, value):
+    ''' Args: value:  a 0-dim pytorch Variable '''
+    value = value.data.cpu().numpy()
+    if key not in self.vals:
+      # Lazy initialization.
+      self.vals[key] = [value]
+    else:
+      self.vals[key].append(value)
+
+  def get_mean_values(self):
+    temp = {}
+    for key in self.vals:
+      temp[key] = np.array(self.vals[key]).mean()
+    return temp
+  
+  def acc_histogram(self, key, values):
+    ''' Args: values:  a 1D pytorch Variable. '''
+    values = values.data.cpu().numpy().tolist()
+    if key not in self.hist:
+      # Lazy initialization.
+      self.hist[key] = values
+    else:
+      self.hist[key] += values
+
+  def flush(self, step):
+    ''' Log and start accumnulating again. '''
+    for key in self.vals:
+      log_value(key, np.array(self.vals[key]).mean(), step=step)
+    for key in self.hist:
+      bincounts, bin_edges = np.histogram(np.array(self.hist[key]), bins=24)
+      log_histogram(key, (bin_edges, bincounts), step=step)
+      #print ('printed hist for key: %s. %d values' % (key, len(self.hist[key])))
+    self.vals = {}
+    self.hist = {}
 
 
 def set_debugger_org():
