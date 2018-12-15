@@ -47,7 +47,7 @@ class Angle360CosSinLoss(Angle360Loss):
     self.criterion = torch.nn.SmoothL1Loss()
 
   def prediction2angle(self, x):
-    return torch.atan2(x[1][:,0], x[1][:,1])
+    return torch.atan2(x[1][:,0], x[1][:,1]) * 180. / pi
 
   def forward(self, inputs, targets):
     targets_sin = torch.sin(targets * pi / 180.)

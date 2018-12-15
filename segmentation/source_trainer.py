@@ -34,55 +34,6 @@ args = fix_img_shape_args(args)
 FORMAT = '[%(filename)s:%(lineno)s - %(funcName)s() %(levelname)s]: %(message)s'
 logging.basicConfig(level=args.logging, format=FORMAT)
 
-if args.resume:
-    print("=> loading checkpoint '{}'".format(args.resume))
-    if not os.path.exists(args.resume):
-        raise OSError("%s does not exist!" % args.resume)
-
-    indir, infn = os.path.split(args.resume)
-
-    old_savename = args.savename
-    args.savename = infn.split("-")[0]
-    print ("savename is %s (original savename %s was overwritten)" % (args.savename, old_savename))
-
-    checkpoint = torch.load(args.resume)
-    args = checkpoint['args']  # Load args!
-
-    model = get_full_model(net=args.net, res=args.res, n_class=args.n_class, input_ch=args.input_ch)
-    optimizer = get_optimizer(model.parameters(), opt=args.opt, lr=args.lr, momentum=args.momentum,
-                              weight_decay=args.weight_decay)
-    model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    print("=> loaded checkpoint '{}'".format(args.resume))
-
-    json_fn = os.path.join(args.outdir, "param_%s_resume.json" % args.savename)
-    check_if_done(json_fn)
-    args.machine = os.uname()[1]
-    save_dic_to_json(args.__dict__, json_fn)
-
-else:
-    model = get_full_model(net=args.net, res=args.res, n_class=args.n_class, input_ch=args.input_ch,
-        yaw_loss=args.yaw_loss)
-    optimizer = get_optimizer(model.parameters(), opt=args.opt, lr=args.lr, momentum=args.momentum,
-                              weight_decay=args.weight_decay)
-
-    args.outdir = os.path.join(args.base_outdir, "%s-%s_only_%sch" % (args.src_dataset, args.split, args.input_ch))
-    args.pth_dir = os.path.join(args.outdir, "pth")
-
-    if args.net in ["fcn", "psp"]:
-        model_name = "%s-%s-res%s" % (args.savename, args.net, args.res)
-    else:
-        model_name = "%s-%s" % (args.savename, args.net)
-
-    args.tflog_dir = os.path.join(args.outdir, "tflog", model_name)
-    mkdir_if_not_exist(args.pth_dir)
-    mkdir_if_not_exist(args.tflog_dir)
-
-    json_fn = os.path.join(args.outdir, "param-%s.json" % model_name)
-    check_if_done(json_fn)
-    args.machine = os.uname()[1]
-    save_dic_to_json(args.__dict__, json_fn)
-
 train_img_shape = tuple([int(x) for x in args.train_img_shape])
 
 img_transform_list = [
@@ -116,8 +67,61 @@ src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.split, img_t
 kwargs = {'num_workers': 5, 'pin_memory': True} if torch.cuda.is_available() else {}
 train_loader = torch.utils.data.DataLoader(src_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
 
-weight = get_class_weight_from_file(n_class=args.n_class, weight_filename=args.loss_weights_file,
-                                    add_bg_loss=args.add_bg_loss)
+model = get_full_model(net=args.net, res=args.res, n_class=args.n_class, 
+    input_ch=args.input_ch, yaw_loss=args.yaw_loss)
+optimizer = get_optimizer(model.parameters(), opt=args.opt, lr=args.lr,
+    momentum=args.momentum, weight_decay=args.weight_decay)
+
+if args.resume:
+    print("=> loading checkpoint '{}'".format(args.resume))
+    if not os.path.exists(args.resume):
+        raise OSError("%s does not exist!" % args.resume)
+
+    checkpoint = torch.load(args.resume)
+
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    if torch.cuda.is_available():
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
+    print("=> loaded checkpoint '{}'".format(args.resume))
+    start_epoch = checkpoint["epoch"]
+    log_counter = checkpoint['log_counter'] if 'log_counter' in checkpoint else start_epoch * len(train_loader)
+else:
+    start_epoch = 0
+    log_counter = 0
+
+if args.net in ["fcn", "psp"]:
+    model_name = "%s-%s-res%s" % (args.savename, args.net, args.res)
+else:
+    model_name = "%s-%s" % (args.savename, args.net)
+
+mode =  "%s-%s_only_%sch" % (args.src_dataset, args.split, args.input_ch)
+outdir = os.path.join(args.base_outdir, mode)
+
+# Create Model Dir
+args.pth_dir = os.path.join(outdir, "pth")
+mkdir_if_not_exist(args.pth_dir)
+
+# Set TF-Logger
+args.tflog_dir = os.path.join(outdir, "tflog", model_name)
+mkdir_if_not_exist(args.tflog_dir)
+tfconfigure(args.tflog_dir, flush_secs=10)
+tflogger = AccumulatedTFLogger()
+
+# Save param dic
+if args.resume:
+    json_fn = os.path.join(outdir, "param_%s_resume.json" % args.savename)
+else:
+    json_fn = os.path.join(outdir, "param-%s.json" % model_name)
+check_if_done(json_fn)
+args.machine = os.uname()[1]
+save_dic_to_json(args.__dict__, json_fn)
+
+weight = get_class_weight_from_file(n_class=args.n_class, 
+    weight_filename=args.loss_weights_file, add_bg_loss=args.add_bg_loss)
 
 if torch.cuda.is_available():
     model.cuda()
@@ -130,12 +134,7 @@ if torch.cuda.is_available():
     criterion_mask = criterion_mask.cuda()
     criterion_yaw = criterion_yaw.cuda()
 
-tfconfigure(args.tflog_dir, flush_secs=10)
-print ('Will write tflogs to %s' % os.path.abspath(args.tflog_dir))
-tflogger = AccumulatedTFLogger()
-log_counter = 0
-
-for epoch in range(args.epochs):
+for epoch in range(start_epoch, args.epochs):
     widgets = [
         'Epoch %d/%d,' % (epoch, args.epochs),
         ' ', progressbar.Counter('batch: %(value)d/%(max_value)d')
@@ -187,7 +186,6 @@ for epoch in range(args.epochs):
         checkpoint_fn = os.path.join(args.pth_dir, "%s-%s-%s.pth.tar" % (
             args.savename, args.net, epoch + 1))
 
-    args.start_epoch = epoch + 1
     save_dic = {
         'args': args,
         'epoch': epoch + 1,
