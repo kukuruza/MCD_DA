@@ -156,7 +156,7 @@ print ('Will train from epoch %d to epoch %d (exclusively)' % (start_epoch, args
 for epoch in range(start_epoch, args.epochs):
     widgets = [
         'Epoch %d/%d,' % (epoch, args.epochs),
-        ' ', progressbar.Counter('batch: %(value)d/%(max_value)d')
+        ' ', progressbar.Counter('batch %(value)d/%(max_value)d')
     ]
     bar = progressbar.ProgressBar(widgets=widgets, max_value=len(train_loader), redirect_stdout=True)
 
@@ -202,15 +202,21 @@ for epoch in range(start_epoch, args.epochs):
         features = model_g(tgt_imgs)
         pred_masks1, pred_yaws1 = model_f1(features, reverse=True)
         pred_masks2, pred_yaws2 = model_f2(features, reverse=True)
-        d_loss = -criterion_d(pred_masks1, pred_masks2)
-        d_loss -= criterion_d(pred_yaws1[0], pred_yaws2[0])  # Only classification.
+        d_loss_mask = - criterion_d(pred_masks1, pred_masks2)
+        if args.yaw_loss in ['clas8', 'clas8-regr1', 'clas8-regr8']:
+            d_loss_yaw = - criterion_d(pred_yaws1[0], pred_yaws2[0])  # Only classification.
+        elif args.yaw_loss in ['cos', 'cos-sin']:
+            d_loss_yaw = - criterion_d(pred_yaws1[1], pred_yaws2[1]) * 0.1  # Only regression.
+        d_loss = d_loss_mask + d_loss_yaw
         d_loss.backward()
+        tflogger.acc_value('train/loss/discr_mask', d_loss_mask / args.batch_size)
+        tflogger.acc_value('train/loss/discr_yaw', d_loss_yaw / args.batch_size)
         tflogger.acc_value('train/loss/discr', d_loss / args.batch_size)
 
         optimizer_f.step()
         optimizer_g.step()
 
-        if log_counter % args.freq_log == 0 and log_counter > 0:
+        if (log_counter + 1) % args.freq_log == 0:
             print 'Epoch %d/%d, batch %d/%d' % \
                 (epoch, args.epochs, ibatch, len(train_loader)), tflogger.get_mean_values()
             tflogger.flush (step=log_counter)

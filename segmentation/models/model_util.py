@@ -17,7 +17,7 @@ def get_full_model(net, n_class, input_ch, **kwargs):
         raise NotImplementedError("Only FCN, DRN are supported!")
 
 
-def get_models(net_name, input_ch, n_class, method="MCD", uses_one_classifier=False, use_ae=False,
+def get_models(net_name, input_ch, n_class, method="MCD", uses_one_classifier=False,
                is_data_parallel=False, **kwargs):
     def get_MCD_model_list():
         if net_name == "fcn":

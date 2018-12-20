@@ -137,7 +137,7 @@ if torch.cuda.is_available():
 for epoch in range(start_epoch, args.epochs):
     widgets = [
         'Epoch %d/%d,' % (epoch, args.epochs),
-        ' ', progressbar.Counter('batch: %(value)d/%(max_value)d')
+        ' ', progressbar.Counter('batch %(value)d/%(max_value)d')
     ]
     bar = progressbar.ProgressBar(widgets=widgets, max_value=len(train_loader), redirect_stdout=True)
 
@@ -167,7 +167,7 @@ for epoch in range(start_epoch, args.epochs):
 
         optimizer.step()
 
-        if log_counter % args.freq_log == 0:
+        if (log_counter + 1) % args.freq_log == 0:
             print 'Epoch %d/%d, batch %d/%d' % \
                 (epoch, args.epochs, ibatch, len(train_loader)), tflogger.get_mean_values()
             tflogger.flush (step=log_counter-1)

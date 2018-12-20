@@ -80,6 +80,8 @@ def getYawOutChannels(yaw_loss):
   elif yaw_loss == 'cos-sin':
     clas_out_ch = dummy
     regr_out_ch = 2
+  else:
+    raise NotImplementedError(yaw_loss)
   return clas_out_ch, regr_out_ch
 
 
