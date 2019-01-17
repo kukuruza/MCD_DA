@@ -65,7 +65,7 @@ def get_common_training_parser(parser):
                         help='whether you use data-augmentation or not')
     parser.add_argument('--loss_weights_file', type=str,
                         help="csv file with weights for dfferent classes")
-    parser.add_argument('--yaw_loss', choices=['clas8', 'clas12', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
+    parser.add_argument('--yaw_loss', choices=['clas8', 'clas72', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
                         help='type of loss for yaw.')
     parser.add_argument('--weight_yaw_regr', type=float, default=0.1,
                         help='regression weight for angle360 loss,')

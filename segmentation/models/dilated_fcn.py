@@ -62,8 +62,8 @@ def getYawOutChannels(yaw_loss):
   in the classification and the regression networks. 
   '''
   dummy = 1
-  if yaw_loss == 'clas12':
-    clas_out_ch = 12
+  if yaw_loss == 'clas72':
+    clas_out_ch = 72
     regr_out_ch = dummy
   elif yaw_loss == 'clas8':
     clas_out_ch = 8

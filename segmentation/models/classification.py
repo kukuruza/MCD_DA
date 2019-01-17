@@ -53,7 +53,6 @@ class Predictor(nn.Module):
             x = grad_reverse(x, self.lambd)
         y = F.relu(self.bn2_fc(self.fc2(x)))
         y = self.fc3(y)
-        y = F.softmax(y, dim=1)
 
         z = F.relu(self.regr_bn2_fc(self.regr_fc2(x)))
         z = self.regr_fc3(z).squeeze()

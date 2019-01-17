@@ -14,8 +14,8 @@ def get_yaw_loss(loss_name, **kwargs):
         weight_yaw_regr=kwargs['weight_yaw_regr'] if 'weight_yaw_regr' in kwargs else 1.)
   elif loss_name == 'clas8':
     return Angle360MixedLoss(N=8, regr_per_angle=False, weight_yaw_regr=0)
-  elif loss_name == 'clas12':
-    return Angle360MixedLoss(N=12, regr_per_angle=False, weight_yaw_regr=0)
+  elif loss_name == 'clas72':
+    return Angle360MixedLoss(N=72, regr_per_angle=False, weight_yaw_regr=0)
   elif loss_name == 'cos':
     return Angle360CosLoss()
   elif loss_name == 'cos-sin':
@@ -99,7 +99,7 @@ class Angle360MixedLoss(Angle360Loss):
 
   def __init__(self, N, weight_yaw_regr, regr_per_angle=False):
     super(Angle360MixedLoss, self).__init__()
-    self.N = 8
+    self.N = N
     self.criterion_int = torch.nn.CrossEntropyLoss()
     self.criterion_frac = torch.nn.SmoothL1Loss()
     self.weight_yaw_regr = weight_yaw_regr
@@ -124,6 +124,7 @@ class Angle360MixedLoss(Angle360Loss):
     else:
         loss_frac1 = self.criterion_frac (inputs[1], targets1_frac)
         loss_frac2 = self.criterion_frac (inputs[1], targets2_frac)
+
     return torch.min(input=(loss_int1 + self.weight_yaw_regr * loss_frac1),
                       other=(loss_int2 + self.weight_yaw_regr * loss_frac2))
 
