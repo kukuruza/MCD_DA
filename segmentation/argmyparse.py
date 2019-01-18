@@ -67,8 +67,8 @@ def get_common_training_parser(parser):
                         help="csv file with weights for dfferent classes")
     parser.add_argument('--yaw_loss', choices=['clas8', 'clas72', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
                         help='type of loss for yaw.')
-    parser.add_argument('--weight_yaw_regr', type=float, default=0.1,
-                        help='regression weight for angle360 loss,')
+    parser.add_argument('--weight_yaw', type=float, default=1.,
+                        help='weight for angle360 loss,')
 
     # ---------- Input Image Setting ---------- #
     parser.add_argument("--input_ch", type=int, default=3,
@@ -117,5 +117,7 @@ def get_da_mcd_training_parser():
                         help="choose from ['mysymkl', 'symkl', 'diff']")
     parser.add_argument('--uses_one_classifier', action="store_true",
                         help="adversarial dropout regularization")
+    parser.add_argument('--num_of_labelled_target', type=int, default=0,
+                        help="mixing fake and real data")
 
     return parser

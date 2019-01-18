@@ -259,6 +259,8 @@ class CitycamDataSet(data.Dataset):
 
         #print (item)
         item = {}
+        if 'index' in self.keys_dict:
+          item[self.keys_dict['index']] = index
         if 'image' in self.keys_dict:
           item[self.keys_dict['image']] = image
         if 'url' in self.keys_dict:
