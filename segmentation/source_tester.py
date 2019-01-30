@@ -121,10 +121,10 @@ for ind, batch in bar(enumerate(target_loader)):
 
     # Extract the mask.
     preds_mask = torch.softmax(preds_mask, dim=1)
-    if train_args.add_bg_loss:
-        preds_mask = preds_mask[:,:train_args.n_class]
-    else:
-        preds_mask = preds_mask[:,:train_args.n_class-1]
+    #if train_args.add_bg_loss:
+    assert preds_mask.shape[1] == train_args.n_class
+    #else:
+    #    preds_mask = preds_mask[:,:train_args.n_class-1]
     preds_mask = preds_mask.data.cpu().numpy()
 
     # Extract the yaw.

@@ -66,7 +66,7 @@ def get_common_training_parser(parser):
     parser.add_argument('--loss_weights_file', type=str,
                         help="csv file with weights for dfferent classes")
     parser.add_argument('--yaw_loss', choices=['clas8', 'clas72', 'clas8-regr8', 'clas8-regr1', 'cos', 'cos-sin'],
-                        help='type of loss for yaw.')
+                        default='cos-sin', help='type of loss for yaw.')
     parser.add_argument('--weight_yaw', type=float, default=1.,
                         help='weight for angle360 loss,')
 

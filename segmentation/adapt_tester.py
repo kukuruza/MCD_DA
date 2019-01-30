@@ -12,6 +12,7 @@ from PIL import Image
 from torch.autograd import Variable
 from torch.utils import data
 from torchvision.transforms import Compose, Normalize, ToTensor
+from tensorboard_logger import configure as tfconfigure, log_value, log_histogram, log_images
 
 from argmyparse import add_additional_params_to_args
 from argmyparse import fix_img_shape_args
@@ -19,6 +20,7 @@ from datasets import get_dataset
 from models.model_util import get_models
 from transform import Scale
 from util import mkdir_if_not_exist, save_dic_to_json, check_if_done
+from util import AccumulatedTFLogger
 
 parser = argparse.ArgumentParser(description='Adapt tester for validation data')
 parser.add_argument('tgt_dataset', type=str, choices=["gta", "city", "test", "ir", "city16", "citycam"])
@@ -77,6 +79,10 @@ print("=> loaded checkpoint '{}'".format(args.trained_checkpoint))
 base_outdir = os.path.join(args.outdir, args.mode, model_name)
 mkdir_if_not_exist(base_outdir)
 
+# Set TF-Logger
+tfconfigure(base_outdir, flush_secs=10)
+tflogger = AccumulatedTFLogger()
+
 json_fn = os.path.join(base_outdir, "param.json")
 check_if_done(json_fn)
 args.machine = os.uname()[1]
@@ -122,11 +128,11 @@ if torch.cuda.is_available():
 if args.tgt_dataset == 'citycam':
     import os, sys
     sys.path.insert(0, os.path.join(os.getenv('HOME'), 'projects/shuffler/lib'))
-    from interfaceWriter import DatasetVideoWriter
+    from interfaceWriter import DatasetWriter
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predicted.db"))
-    writer_prob = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
+    writer_prob = DatasetWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predictedtop.db"))
-    writer_top = DatasetVideoWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
+    writer_top = DatasetWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
 
 widgets = [ progressbar.Counter('Batch: %(value)d/%(max_value)d') ]
 bar = progressbar.ProgressBar(max_value=len(target_loader), widgets=widgets, redirect_stdout=True)
@@ -146,10 +152,9 @@ for index, batch in bar(enumerate(target_loader)):
     for path, pred_mask, pred_yaw in zip(paths, pred_masks, pred_yaws):
         logging.debug('Working on item "%s"' % path)
 
-        if train_args.add_bg_loss:
-            pred_mask = pred_mask[:train_args.n_class].data.cpu()
-        else:
-            pred_yaw = pred_yaw[:train_args.n_class - 1].data.cpu()
+        pred_mask = pred_mask.data.cpu()
+        assert pred_mask.shape[0] == train_args.n_class
+#        pred_yaw = pred_yaw[:train_args.n_class - 1].data.cpu()
 
         assert args.tgt_dataset == 'citycam'
         pred_mask = torch.softmax(pred_mask, dim=0)
@@ -158,6 +163,8 @@ for index, batch in bar(enumerate(target_loader)):
         mask = np.uint8((prob * 255).numpy())
         mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
         writer_prob.addImage(mask=mask, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
+        if index % 10 == 0:
+          log_images('test/pred/masks', torch.Tensor(255 - mask).unsqueeze(0), step=index)
         # Write the argmax class
         argmax_pred_mask = np.argmax(pred_mask.numpy(), axis=0)
         mask = 255 - np.uint8(argmax_pred_mask * 255)
