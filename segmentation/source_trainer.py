@@ -159,33 +159,20 @@ for epoch in range(start_epoch, args.epochs):
         imgs, gt_masks = Variable(imgs), Variable(gt_masks)
         if torch.cuda.is_available():
             imgs, gt_masks = imgs.cuda(), gt_masks.cuda()
-        if args.weight_yaw > 0:
-            gt_yaws = batch['yaw'].float()
-            gt_yaws = Variable(gt_yaws)
-            if torch.cuda.is_available():
-                gt_yaws = gt_yaws.cuda()
 
-        # update generator and classifiers by source samples
         optimizer_f.zero_grad()
         optimizer_g.zero_grad()
+
+        # update generator and classifiers by source samples
         features = model_g(imgs)
-        pred_masks, pred_yaws = model_f1(features)
+        pred_masks, _ = model_f1(features)
 
         loss_mask = criterion_mask(pred_masks, gt_masks)
-        if args.weight_yaw > 0:
-            loss_yaw = criterion_yaw(pred_yaws, gt_yaws)
-            metrics_yaw = criterion_yaw.metrics(pred_yaws, gt_yaws)
 
         loss = loss_mask
-        if args.weight_yaw > 0:
-            loss += loss_yaw
         loss.backward()
         tflogger.acc_value('train/loss/total', loss / args.batch_size)
         tflogger.acc_value('train/loss/mask', loss_mask / args.batch_size)
-        if args.weight_yaw > 0:
-            tflogger.acc_value('train/loss/yaw', loss_yaw / args.batch_size)
-            tflogger.acc_value('train/metrics/yaw', metrics_yaw.mean())
-            tflogger.acc_histogram('train/hist/yaw', metrics_yaw)
 
         optimizer_g.step()
         optimizer_f.step()

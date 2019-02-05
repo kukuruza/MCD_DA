@@ -67,7 +67,6 @@ train_loader = torch.utils.data.DataLoader(
 
 model_g, model_f1, model_f2 = get_models(
     net_name=args.net, res=args.res, input_ch=args.input_ch, n_class=args.n_class,
-    method=args.method, uses_one_classifier=args.uses_one_classifier,
     is_data_parallel=args.is_data_parallel, yaw_loss=args.yaw_loss)
 
 optimizer_g = get_optimizer(model_g.parameters(),
@@ -100,10 +99,6 @@ if args.resume:
 else:
     start_epoch = 0
     log_counter = 0
-
-if args.uses_one_classifier:
-    print ("f1 and f2 are same!")
-    model_f2 = model_f1
 
 if args.net in ["fcn", "psp"]:
     model_name = "%s-%s-%s-res%s" % (args.method, args.savename, args.net, args.res)
@@ -162,88 +157,52 @@ for epoch in range(start_epoch, args.epochs):
 
     for ibatch, batch in bar(enumerate(train_loader)):
 
-        src_imgs, src_masks, src_yaws = batch['S_image'], batch['S_mask'], batch['S_yaw'].float()
+        src_imgs, src_masks = batch['S_image'], batch['S_mask']
         tgt_imgs, tgt_masks = batch['T_image'], batch['T_mask'],
-        tgt_use_masks = batch['T_index'] < args.num_of_labelled_target
-        src_imgs, src_masks, src_yaws = Variable(src_imgs), Variable(src_masks), Variable(src_yaws)
-        tgt_imgs, tgt_masks, tgt_use_masks = Variable(tgt_imgs), Variable(tgt_masks), Variable(tgt_use_masks)
+        src_imgs, src_masks = Variable(src_imgs), Variable(src_masks)
+        tgt_imgs, tgt_masks = Variable(tgt_imgs), Variable(tgt_masks)
 
         if torch.cuda.is_available():
-            src_imgs, src_masks, src_yaws = src_imgs.cuda(), src_masks.cuda(), src_yaws.cuda()
-            tgt_imgs, tgt_masks, tgt_use_masks = tgt_imgs.cuda(), tgt_masks.cuda(), tgt_use_masks.cuda()
+            src_imgs, src_masks = src_imgs.cuda(), src_masks.cuda()
+            tgt_imgs, tgt_masks = tgt_imgs.cuda(), tgt_masks.cuda()
 
         optimizer_g.zero_grad()
         optimizer_f.zero_grad()
 
         # update generator and classifiers by source samples
         features = model_g(src_imgs)
-        pred_src_masks1, pred_yaws1 = model_f1(features)
-        pred_src_masks2, pred_yaws2 = model_f2(features)
+        pred_src_masks1, _ = model_f1(features)
+        pred_src_masks2, _ = model_f2(features)
+
         c_loss_mask  = criterion_mask(pred_src_masks1, src_masks)
         c_loss_mask += criterion_mask(pred_src_masks2, src_masks)
         c_loss_mask /= 2.
-        if args.weight_yaw > 0:
-            c_loss_yaw  = criterion_yaw(pred_yaws1, src_yaws)
-            c_loss_yaw += criterion_yaw(pred_yaws2, src_yaws)
-            c_loss_yaw /= 2.
-            c_metrics_yaw1 = criterion_yaw.metrics(pred_yaws1, src_yaws)
-            c_metrics_yaw2 = criterion_yaw.metrics(pred_yaws2, src_yaws)
-        else:
-            c_loss_yaw = 0
-        c_loss = c_loss_mask + c_loss_yaw * args.weight_yaw
+        c_loss = c_loss_mask
         c_loss.backward(retain_graph=True)
         tflogger.acc_value('train/loss/src', c_loss / args.batch_size)
         tflogger.acc_value('train/loss/mask', c_loss_mask / args.batch_size)
-        if args.weight_yaw > 0:
-            tflogger.acc_value('train/loss/yaw', c_loss_yaw / args.batch_size)
-            tflogger.acc_value('train/metrics/yaw1', c_metrics_yaw1.mean())
-            tflogger.acc_value('train/metrics/yaw2', c_metrics_yaw2.mean())
-            tflogger.acc_value('train/metrics/yaw', ((c_metrics_yaw1 + c_metrics_yaw2) / 2.).mean())
-            tflogger.acc_histogram('train/hist/yaw1', c_metrics_yaw1)
-            tflogger.acc_histogram('train/hist/yaw2', c_metrics_yaw2)
 
         # d tgt loss
         lambd = 1.0
         model_f1.set_lambda(lambd)
         model_f2.set_lambda(lambd)
         features = model_g(tgt_imgs)
-        pred_tgt_masks1, pred_yaws1 = model_f1(features, reverse=True)
-        pred_tgt_masks2, pred_yaws2 = model_f2(features, reverse=True)
+        pred_tgt_masks1, _ = model_f1(features, reverse=True)
+        pred_tgt_masks2, _ = model_f2(features, reverse=True)
         d_loss_mask = - criterion_d(pred_tgt_masks1, pred_tgt_masks2)
-        if args.weight_yaw > 0:
-            if args.yaw_loss in ['clas8', 'clas8-regr1', 'clas8-regr8']:
-                d_loss_yaw = - criterion_d(pred_yaws1[0], pred_yaws2[0])  # Only classification.
-            elif args.yaw_loss in ['cos', 'cos-sin']:
-                d_loss_yaw = - criterion_d(pred_yaws1[1], pred_yaws2[1]) * 0.1  # Only regression.
-        else:
-            d_loss_yaw = 0
-        d_loss = d_loss_mask + d_loss_yaw
+        d_loss = d_loss_mask
         d_loss.backward()
         tflogger.acc_value('train/loss/discr_mask', d_loss_mask / args.batch_size)
-        if args.weight_yaw > 0:
-            tflogger.acc_value('train/loss/discr_yaw', d_loss_yaw / args.batch_size)
         tflogger.acc_value('train/loss/discr', d_loss / args.batch_size)
 
         optimizer_f.step()
         optimizer_g.step()
 
         # c tgt loss
-        features = model_g(tgt_imgs)
-        pred_tgt_masks1, pred_yaws1 = model_f1(features)
-        pred_tgt_masks2, pred_yaws2 = model_f2(features)
-        if tgt_use_masks.sum() > 0:
-            optimizer_g.zero_grad()
-            c_loss_mask  = criterion_mask(pred_tgt_masks1[tgt_use_masks,:,:,:], tgt_masks[tgt_use_masks,:,:])
-            c_loss_mask += criterion_mask(pred_tgt_masks2[tgt_use_masks,:,:,:], tgt_masks[tgt_use_masks,:,:])
-            c_loss_mask /= 2.
-            c_loss_mask[torch.isnan(c_loss_mask)] = 0
-            c_loss = c_loss_mask #+ c_loss_yaw
-            c_loss.backward()
-            optimizer_g.step()
-        else:
-            c_loss = 0
-        if args.num_of_labelled_target > 0:
-            tflogger.acc_value('train/loss/mask_tgt', c_loss_mask / args.batch_size)
+#        features = model_g(tgt_imgs)
+#        pred_tgt_masks1, pred_yaws1 = model_f1(features)
+#        pred_tgt_masks2, pred_yaws2 = model_f2(features)
+#        c_loss = 0
 
         if (log_counter + 1) % args.freq_log == 0:
             print 'Epoch %d/%d, batch %d/%d' % \
@@ -252,10 +211,10 @@ for epoch in range(start_epoch, args.epochs):
             log_images('train/gt/tgt_imgs', tgt_imgs[:1].cpu().data, step=log_counter)
             log_images('train/gt/src_masks', src_masks[:1].cpu().data, step=log_counter)
             log_images('train/gt/tgt_masks', tgt_masks[:1].cpu().data, step=log_counter)
-            log_images('train/pred/src_masks1', torch.nn.functional.softmax(pred_src_masks1, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
-            log_images('train/pred/tgt_masks1', torch.nn.functional.softmax(pred_tgt_masks1, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
-            log_images('train/pred/src_masks2', torch.nn.functional.softmax(pred_src_masks2, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
-            log_images('train/pred/tgt_masks2', torch.nn.functional.softmax(pred_tgt_masks2, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
+            log_images('train/pred/src_masks1', torch.softmax(pred_src_masks1, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
+#            log_images('train/pred/tgt_masks1', torch.softmax(pred_tgt_masks1, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
+            log_images('train/pred/src_masks2', torch.softmax(pred_src_masks2, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
+#            log_images('train/pred/tgt_masks2', torch.softmax(pred_tgt_masks2, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
             tflogger.flush (step=log_counter)
         log_counter += 1
 
