@@ -211,4 +211,5 @@ for epoch in range(start_epoch, args.epochs):
         'optimizer_f': optimizer_f.state_dict(),
     }
 
-    save_checkpoint(save_dic, is_best=False, filename=checkpoint_fn)
+    if (epoch+1) % args.freq_checkpoint == 0:
+        save_checkpoint(save_dic, is_best=False, filename=checkpoint_fn)

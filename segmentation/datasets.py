@@ -242,9 +242,10 @@ class CitycamDataSet(data.Dataset):
 
         logging.info('Dataset root: %s, split: %s' % (split, root))
         db_file = os.path.realpath(os.path.join(root, split + '.db'))
+        self.rootdir = os.path.dirname(db_file)
         logging.info('db_file is resolved to "%s"' % db_file)
-        assert os.path.exists(db_file)
-        self.dataset = ObjectsDataset(db_file=db_file, rootdir=os.getenv('CITY_PATH'), where_object=where_object)
+        assert os.path.exists(db_file), db_file
+        self.dataset = ObjectsDataset(db_file=db_file, rootdir=self.rootdir, where_object=where_object)
         self.size = len(self.dataset)
 
         self.keys_dict = keys_dict

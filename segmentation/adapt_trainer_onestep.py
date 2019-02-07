@@ -158,13 +158,13 @@ for epoch in range(start_epoch, args.epochs):
     for ibatch, batch in bar(enumerate(train_loader)):
 
         src_imgs, src_masks = batch['S_image'], batch['S_mask']
-        tgt_imgs, tgt_masks = batch['T_image'], batch['T_mask'],
+        tgt_imgs, tgt_masks, tgt_use_masks = batch['T_image'], batch['T_mask'], batch['T_index'] < args.num_of_labelled_target
         src_imgs, src_masks = Variable(src_imgs), Variable(src_masks)
-        tgt_imgs, tgt_masks = Variable(tgt_imgs), Variable(tgt_masks)
+        tgt_imgs, tgt_masks, tgt_use_masks = Variable(tgt_imgs), Variable(tgt_masks), Variable(tgt_use_masks)
 
         if torch.cuda.is_available():
             src_imgs, src_masks = src_imgs.cuda(), src_masks.cuda()
-            tgt_imgs, tgt_masks = tgt_imgs.cuda(), tgt_masks.cuda()
+            tgt_imgs, tgt_masks, tgt_use_masks = tgt_imgs.cuda(), tgt_masks.cuda(), tgt_use_masks.cuda()
 
         optimizer_g.zero_grad()
         optimizer_f.zero_grad()
@@ -178,7 +178,8 @@ for epoch in range(start_epoch, args.epochs):
         c_loss_mask += criterion_mask(pred_src_masks2, src_masks)
         c_loss_mask /= 2.
         c_loss = c_loss_mask
-        c_loss.backward(retain_graph=True)
+        c_loss.backward()
+#        c_loss.backward(retain_graph=True)
         tflogger.acc_value('train/loss/src', c_loss / args.batch_size)
         tflogger.acc_value('train/loss/mask', c_loss_mask / args.batch_size)
 
@@ -191,18 +192,27 @@ for epoch in range(start_epoch, args.epochs):
         pred_tgt_masks2, _ = model_f2(features, reverse=True)
         d_loss_mask = - criterion_d(pred_tgt_masks1, pred_tgt_masks2)
         d_loss = d_loss_mask
-        d_loss.backward()
+        if tgt_use_masks.sum() > 0:
+          d_loss.backward(retain_graph=True)
+        else:
+          d_loss.backward()
         tflogger.acc_value('train/loss/discr_mask', d_loss_mask / args.batch_size)
         tflogger.acc_value('train/loss/discr', d_loss / args.batch_size)
 
+        # c tgt loss
+        if tgt_use_masks.sum() > 0:
+            pred_tgt_masks1, _ = model_f1(features)
+            pred_tgt_masks2, _ = model_f2(features)
+            c_loss_mask  = criterion_mask(pred_tgt_masks1[tgt_use_masks,:,:,:], tgt_masks[tgt_use_masks,:,:])
+            c_loss_mask += criterion_mask(pred_tgt_masks2[tgt_use_masks,:,:,:], tgt_masks[tgt_use_masks,:,:])
+            c_loss_mask /= 2.
+            c_loss_mask[torch.isnan(c_loss_mask)] = 0
+            c_loss = c_loss_mask
+            c_loss.backward()
+            tflogger.acc_value('train/loss/mask_tgt', c_loss_mask / tgt_use_masks.sum().type(torch.float))
+
         optimizer_f.step()
         optimizer_g.step()
-
-        # c tgt loss
-#        features = model_g(tgt_imgs)
-#        pred_tgt_masks1, pred_yaws1 = model_f1(features)
-#        pred_tgt_masks2, pred_yaws2 = model_f2(features)
-#        c_loss = 0
 
         if (log_counter + 1) % args.freq_log == 0:
             print 'Epoch %d/%d, batch %d/%d' % \
@@ -239,4 +249,5 @@ for epoch in range(start_epoch, args.epochs):
     if not args.uses_one_classifier:
         save_dic['f2_state_dict'] = model_f2.state_dict()
 
-    save_checkpoint(save_dic, is_best=False, filename=checkpoint_fn)
+    if (epoch+1) % args.freq_checkpoint == 0:
+        save_checkpoint(save_dic, is_best=False, filename=checkpoint_fn)

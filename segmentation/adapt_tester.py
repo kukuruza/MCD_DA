@@ -130,9 +130,9 @@ if args.tgt_dataset == 'citycam':
     sys.path.insert(0, os.path.join(os.getenv('HOME'), 'projects/shuffler/lib'))
     from interfaceWriter import DatasetWriter
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predicted.db"))
-    writer_prob = DatasetWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
+    writer_prob = DatasetWriter(out_db_file=out_db_file, rootdir=tgt_dataset.rootdir, overwrite=True)
     out_db_file = os.path.abspath(os.path.join(base_outdir, "predictedtop.db"))
-    writer_top = DatasetWriter(out_db_file=out_db_file, rootdir=os.getenv('CITY_PATH'), overwrite=True)
+    writer_top = DatasetWriter(out_db_file=out_db_file, rootdir=tgt_dataset.rootdir, overwrite=True)
 
 widgets = [ progressbar.Counter('Batch: %(value)d/%(max_value)d') ]
 bar = progressbar.ProgressBar(max_value=len(target_loader), widgets=widgets, redirect_stdout=True)
@@ -164,6 +164,7 @@ for index, batch in bar(enumerate(target_loader)):
         mask = cv2.resize(mask, dsize=test_img_shape, interpolation=cv2.INTER_NEAREST)
         writer_prob.addImage(mask=mask, imagefile=path, width=test_img_shape[0], height=test_img_shape[1])
         if index % 10 == 0:
+          log_images('test/gt/imgs', imgs[:1].cpu().data, step=index)
           log_images('test/pred/masks', torch.Tensor(255 - mask).unsqueeze(0), step=index)
         # Write the argmax class
         argmax_pred_mask = np.argmax(pred_mask.numpy(), axis=0)
