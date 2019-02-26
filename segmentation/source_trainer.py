@@ -65,7 +65,7 @@ if args.weight_yaw > 0:
 src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.split, img_transform=img_transform,
                           label_transform=label_transform, test=False, input_ch=args.input_ch, keys_dict=keys_dict)
 
-kwargs = {'num_workers': 5, 'pin_memory': True} if torch.cuda.is_available() else {}
+kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
 train_loader = torch.utils.data.DataLoader(src_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
 
 model_g, model_f1, model_f2 = get_models(

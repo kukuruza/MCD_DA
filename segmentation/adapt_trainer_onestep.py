@@ -56,9 +56,14 @@ src_dataset = get_dataset(dataset_name=args.src_dataset, split=args.src_split, i
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
                           keys_dict={'image': 'S_image', 'mask': 'S_mask', 'yaw': 'S_yaw'})
 
-tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.tgt_split, img_transform=img_transform,
+if args.num_of_labelled_target > 0:
+  tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.tgt_split, img_transform=img_transform,
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
                           keys_dict={'image': 'T_image', 'mask': 'T_mask', 'index': 'T_index'})
+else:
+  tgt_dataset = get_dataset(dataset_name=args.tgt_dataset, split=args.tgt_split, img_transform=img_transform,
+                          label_transform=label_transform, test=False, input_ch=args.input_ch,
+                          keys_dict={'image': 'T_image'})
 
 train_loader = torch.utils.data.DataLoader(
     ConcatDataset([src_dataset, tgt_dataset]),
@@ -157,14 +162,16 @@ for epoch in range(start_epoch, args.epochs):
 
     for ibatch, batch in bar(enumerate(train_loader)):
 
-        src_imgs, src_masks = batch['S_image'], batch['S_mask']
-        tgt_imgs, tgt_masks, tgt_use_masks = batch['T_image'], batch['T_mask'], batch['T_index'] < args.num_of_labelled_target
-        src_imgs, src_masks = Variable(src_imgs), Variable(src_masks)
-        tgt_imgs, tgt_masks, tgt_use_masks = Variable(tgt_imgs), Variable(tgt_masks), Variable(tgt_use_masks)
+        src_imgs, src_masks, tgt_imgs = batch['S_image'], batch['S_mask'], batch['T_image']
+        src_imgs, src_masks, tgt_imgs = Variable(src_imgs), Variable(src_masks), Variable(tgt_imgs)
+        if args.num_of_labelled_target > 0:
+            tgt_masks, tgt_use_masks = batch['T_mask'], batch['T_index'] < args.num_of_labelled_target
+            tgt_masks, tgt_use_masks = Variable(tgt_masks), Variable(tgt_use_masks)
 
         if torch.cuda.is_available():
-            src_imgs, src_masks = src_imgs.cuda(), src_masks.cuda()
-            tgt_imgs, tgt_masks, tgt_use_masks = tgt_imgs.cuda(), tgt_masks.cuda(), tgt_use_masks.cuda()
+            src_imgs, src_masks, tgt_imgs = src_imgs.cuda(), src_masks.cuda(), tgt_imgs.cuda()
+            if args.num_of_labelled_target > 0:
+                tgt_masks, tgt_use_masks = tgt_masks.cuda(), tgt_use_masks.cuda()
 
         optimizer_g.zero_grad()
         optimizer_f.zero_grad()
@@ -192,7 +199,7 @@ for epoch in range(start_epoch, args.epochs):
         pred_tgt_masks2, _ = model_f2(features, reverse=True)
         d_loss_mask = - criterion_d(pred_tgt_masks1, pred_tgt_masks2)
         d_loss = d_loss_mask
-        if tgt_use_masks.sum() > 0:
+        if args.num_of_labelled_target > 0 and tgt_use_masks.sum() > 0:
           d_loss.backward(retain_graph=True)
         else:
           d_loss.backward()
@@ -200,7 +207,7 @@ for epoch in range(start_epoch, args.epochs):
         tflogger.acc_value('train/loss/discr', d_loss / args.batch_size)
 
         # c tgt loss
-        if tgt_use_masks.sum() > 0:
+        if args.num_of_labelled_target > 0 and tgt_use_masks.sum() > 0:
             pred_tgt_masks1, _ = model_f1(features)
             pred_tgt_masks2, _ = model_f2(features)
             c_loss_mask  = criterion_mask(pred_tgt_masks1[tgt_use_masks,:,:,:], tgt_masks[tgt_use_masks,:,:])
@@ -210,6 +217,7 @@ for epoch in range(start_epoch, args.epochs):
             c_loss = c_loss_mask
             c_loss.backward()
             tflogger.acc_value('train/loss/mask_tgt', c_loss_mask / tgt_use_masks.sum().type(torch.float))
+            log_images('train/gt/tgt_masks', tgt_masks[:1].cpu().data, step=log_counter)
 
         optimizer_f.step()
         optimizer_g.step()
@@ -220,7 +228,6 @@ for epoch in range(start_epoch, args.epochs):
             log_images('train/gt/src_imgs', src_imgs[:1].cpu().data, step=log_counter)
             log_images('train/gt/tgt_imgs', tgt_imgs[:1].cpu().data, step=log_counter)
             log_images('train/gt/src_masks', src_masks[:1].cpu().data, step=log_counter)
-            log_images('train/gt/tgt_masks', tgt_masks[:1].cpu().data, step=log_counter)
             log_images('train/pred/src_masks1', torch.softmax(pred_src_masks1, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
 #            log_images('train/pred/tgt_masks1', torch.softmax(pred_tgt_masks1, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
             log_images('train/pred/src_masks2', torch.softmax(pred_src_masks2, dim=1)[:1,1,:,:].cpu().data, step=log_counter)
