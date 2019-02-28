@@ -19,30 +19,9 @@ from PIL import Image
 from torchvision import transforms
 
 import drn
-from models.grad_reversal import grad_reverse
-
-CITYSCAPE_PALLETE = np.asarray([
-    [128, 64, 128],
-    [244, 35, 232],
-    [70, 70, 70],
-    [102, 102, 156],
-    [190, 153, 153],
-    [153, 153, 153],
-    [250, 170, 30],
-    [220, 220, 0],
-    [107, 142, 35],
-    [152, 251, 152],
-    [70, 130, 180],
-    [220, 20, 60],
-    [255, 0, 0],
-    [0, 0, 142],
-    [0, 0, 70],
-    [0, 60, 100],
-    [0, 80, 100],
-    [0, 0, 230],
-    [119, 11, 32],
-    [0, 0, 0]], dtype=np.uint8)
-
+from grad_reversal import grad_reverse
+from models.classification import Predictor as ClasPredictor
+from models.classification import Feature as ClasFeature
 
 def fill_up_weights(up):
     w = up.weight.data
@@ -56,21 +35,72 @@ def fill_up_weights(up):
         w[c, 0, :, :] = w[0, 0, :, :]
 
 
+class BaseWithMiddleOut(nn.Module):
+  ''' Concat intermediate layers into a second output. '''
+
+  def __init__(self, submodules, layers_to_concat):
+    super(BaseWithMiddleOut, self).__init__()
+
+    self.submodules = nn.ModuleList(submodules)
+    self.layers_to_concat = layers_to_concat
+    #print ('Total submodules: %d' % len(submodules))
+
+  def forward(self, x):
+    pyramid = []
+    for isubmodule,submodule in enumerate(self.submodules):
+      x = submodule(x)
+      if isubmodule in self.layers_to_concat:
+        pyramid.append(x)
+      #print ('After submodule %d, shape is %s, total %d pixels.' % (isubmodule, x.size(), x.numel()))
+    pyramid = torch.cat(pyramid, dim=1)
+    #print ('Pyramid has shape', pyramid.size())
+    return x, pyramid
+
+
+def getYawOutChannels(yaw_loss):
+  ''' Depending on how yaw is predicted, it needs a certain number of output channels
+  in the classification and the regression networks. 
+  '''
+  dummy = 1
+  if yaw_loss == 'clas72':
+    clas_out_ch = 72
+    regr_out_ch = dummy
+  elif yaw_loss == 'clas8':
+    clas_out_ch = 8
+    regr_out_ch = dummy
+  elif yaw_loss == 'clas8-regr1':
+    clas_out_ch = 8
+    regr_out_ch = 1
+  elif yaw_loss == 'clas8-regr8':
+    clas_out_ch = 8
+    regr_out_ch = 8
+  elif yaw_loss == 'cos':
+    clas_out_ch = dummy
+    regr_out_ch = 1
+  elif yaw_loss == 'cos-sin':
+    clas_out_ch = dummy
+    regr_out_ch = 2
+  else:
+    raise NotImplementedError(yaw_loss)
+  return clas_out_ch, regr_out_ch
+
+
 class DRNSeg(nn.Module):
-    def __init__(self, model_name, n_class, input_ch=3, pretrained_model=None,
-                 pretrained=True, use_torch_up=False):
+    def __init__(self, model_name, n_class, yaw_loss, input_ch=3, pretrained_model=None,
+                 pretrained=True, use_torch_up=False, concat_intermediate_layers=[6, 7, 8]):
         super(DRNSeg, self).__init__()
+        clas_out_ch, regr_out_ch = getYawOutChannels(yaw_loss)
 
         model = drn.__dict__.get(model_name)(
             pretrained=pretrained, num_classes=1000, input_ch=input_ch)
-        pmodel = nn.DataParallel(model)
-        if pretrained_model is not None:
-            pmodel.load_state_dict(pretrained_model)
-        self.base = nn.Sequential(*list(model.children())[:-2])
+        #pmodel = nn.DataParallel(model)
+        #if pretrained_model is not None:
+        #    pmodel.load_state_dict(pretrained_model)
+        self.base = BaseWithMiddleOut(list(model.children())[:-2], concat_intermediate_layers)
+        self.clas_feature = ClasFeature()
+        self.clas_predictor = ClasPredictor(clas_out_ch=clas_out_ch, regr_out_ch=regr_out_ch)
 
-        self.seg = nn.Conv2d(model.out_dim, n_class,
-                             kernel_size=1, bias=True)
-        self.softmax = nn.LogSoftmax()
+        self.seg = nn.Conv2d(model.out_dim, n_class, kernel_size=1, bias=True)
         m = self.seg
         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
         m.weight.data.normal_(0, math.sqrt(2. / n))
@@ -83,16 +113,15 @@ class DRNSeg(nn.Module):
                                     bias=False)
             # fill_up_weights(up)
             # up.weight.requires_grad = False  # WHY?
-
             self.up = up
 
     def forward(self, x):
-        x = self.base(x)
+        x, stacked = self.base(x)
         x = self.seg(x)
         y = self.up(x)
-        # return self.softmax(y), x
-        # return self.softmax(y)
-        return y
+        z = self.clas_feature(stacked)
+        z = self.clas_predictor(z)
+        return y, z
 
     def optim_parameters(self, memo=None):
         for param in self.base.parameters():
@@ -102,27 +131,29 @@ class DRNSeg(nn.Module):
 
 
 class DRNSegBase(nn.Module):
-    def __init__(self, model_name, n_class, pretrained_model=None, pretrained=True, input_ch=3):
+    def __init__(self, model_name, n_class, pretrained_model=None,
+            pretrained=True, input_ch=3, concat_intermediate_layers=[6, 7, 8]):
         super(DRNSegBase, self).__init__()
 
         model = drn.__dict__.get(model_name)(
             pretrained=pretrained, num_classes=1000, input_ch=input_ch)
-        pmodel = nn.DataParallel(model)
-        if pretrained_model is not None:
-            pmodel.load_state_dict(pretrained_model)
-        self.base = nn.Sequential(*list(model.children())[:-2])
+        #pmodel = nn.DataParallel(model)
+        #if pretrained_model is not None:
+        #    pmodel.load_state_dict(pretrained_model)
+        self.base = BaseWithMiddleOut(list(model.children())[:-2], concat_intermediate_layers)
+        self.clas_feature = ClasFeature()
 
-        self.seg = nn.Conv2d(model.out_dim, n_class,
-                             kernel_size=1, bias=True)
+        self.seg = nn.Conv2d(model.out_dim, n_class, kernel_size=1, bias=True)
         m = self.seg
         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
         m.weight.data.normal_(0, math.sqrt(2. / n))
         m.bias.data.zero_()
 
     def forward(self, x):
-        x = self.base(x)
+        x, stacked = self.base(x)
         x = self.seg(x)
-        return x
+        z = self.clas_feature(stacked)
+        return x, z
 
     def optim_parameters(self, memo=None):
         for param in self.base.parameters():
@@ -132,28 +163,29 @@ class DRNSegBase(nn.Module):
 
 
 class DRNSegPixelClassifier(nn.Module):
-    def __init__(self, n_class, use_torch_up=False, dropout=False):
+    def __init__(self, n_class, yaw_loss, use_torch_up=False, dropout=False):
         super(DRNSegPixelClassifier, self).__init__()
-        self.dropout = dropout
+        clas_out_ch, regr_out_ch = getYawOutChannels(yaw_loss)
+
         if use_torch_up:
             self.up = nn.UpsamplingBilinear2d(scale_factor=8)
         else:
-
             up = nn.ConvTranspose2d(n_class, n_class, 16, stride=8, padding=4,
                                     output_padding=0, groups=n_class,
                                     bias=False)
             self.up = up
+        self.clas_predictor = ClasPredictor(clas_out_ch=clas_out_ch, regr_out_ch=regr_out_ch)
 
     def set_lambda(self, lambd):
         self.lambd = lambd
 
-    def forward(self, x, reverse=False):
+    def forward(self, (x, z), reverse=False):
         if reverse:
             x = grad_reverse(x, self.lambd)
-            x = self.up(x)
-        else:
-            x = self.up(x)
-        return x
+        x = self.up(x)
+        z = self.clas_predictor(z)
+        return x, z
+
 
 class DRNSegPixelClassifier_ADR(nn.Module):
     def __init__(self, n_class, use_torch_up=False, input_ch=3):

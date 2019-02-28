@@ -4,6 +4,7 @@ import os
 import os.path as osp
 import logging
 from math import floor
+from pprint import pprint
 
 import numpy as np
 import torch
@@ -217,21 +218,6 @@ class SynthiaDataSet(data.Dataset):
 
 class CitycamDataSet(data.Dataset):
 
-    def _onehot_yaw(self, yaw):
-        assert yaw >= 0 and yaw < 360., yaw
-        yaw = yaw / 360. * 12.
-
-        onehot = np.zeros((12,), dtype=float)
-        integral = int(floor(yaw))
-        fraction = yaw - floor(yaw)
-        if fraction < 0.5:
-            onehot[integral] = 1. - fraction
-            onehot[(integral - 1) % 12] = fraction
-        else:
-            onehot[integral] = fraction
-            onehot[(integral + 1) % 12] = 1. - fraction
-        return onehot
-
     def __init__(self, root, split, img_transform=None, label_transform=None,
                 test=False, input_ch=3, 
                 keys_dict={}):
@@ -256,9 +242,10 @@ class CitycamDataSet(data.Dataset):
 
         logging.info('Dataset root: %s, split: %s' % (split, root))
         db_file = os.path.realpath(os.path.join(root, split + '.db'))
+        self.rootdir = os.path.dirname(db_file)
         logging.info('db_file is resolved to "%s"' % db_file)
-        assert os.path.exists(db_file)
-        self.dataset = ObjectsDataset(db_file=db_file, rootdir=os.getenv('CITY_PATH'), where_object=where_object)
+        assert os.path.exists(db_file), db_file
+        self.dataset = ObjectsDataset(db_file=db_file, rootdir=self.rootdir, where_object=where_object)
         self.size = len(self.dataset)
 
         self.keys_dict = keys_dict
@@ -273,6 +260,8 @@ class CitycamDataSet(data.Dataset):
 
         #print (item)
         item = {}
+        if 'index' in self.keys_dict:
+          item[self.keys_dict['index']] = index
         if 'image' in self.keys_dict:
           item[self.keys_dict['image']] = image
         if 'url' in self.keys_dict:
@@ -289,22 +278,20 @@ class CitycamDataSet(data.Dataset):
                 mask = self.label_transform(mask)
             item[self.keys_dict['mask']] = mask
 
+        if 'objectid' in self.keys_dict:
+            item[self.keys_dict['objectid']] = car['objectid']
+
         if 'yaw' in self.keys_dict:
             yaw = float(car['yaw'])
-            yaw_discr = int(floor(yaw / 360 * 12 + 0.5)) % 12
-            logging.debug('Yaw %1.f transformed into one-hot %s' % (yaw, str(yaw_discr)))
-            if 'yaw' in self.keys_dict:
-              item[self.keys_dict['yaw']] = yaw_discr
-            if 'yaw_onehot' in self.keys_dict:
-              item[self.keys_dict['yaw_onehot']] = self._onehot_yaw(yaw)
-            if 'yaw_raw' in self.keys_dict:
-              item[self.keys_dict['yaw_raw']] = yaw % 360
+            yaw %= 360.
+            item[self.keys_dict['yaw']] = yaw
 
         if 'pitch' in self.keys_dict:
             pitch = float(car['pitch'])
             pitch /= 90.
             item[self.keys_dict['pitch']] = pitch
 
+        #pprint(item)
         return item
 
     def __len__(self):
