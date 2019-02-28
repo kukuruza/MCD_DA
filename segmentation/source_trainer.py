@@ -97,9 +97,11 @@ if args.resume:
     print("=> loaded checkpoint '{}'".format(args.resume))
     start_epoch = checkpoint["epoch"]
     log_counter = checkpoint['log_counter'] if 'log_counter' in checkpoint else start_epoch * len(train_loader)
+    istep = checkpoint['istep'] if 'istep' in checkpoint else start_epoch * len(src_dataset)
 else:
     start_epoch = 0
     log_counter = 0
+    istep = 0
 
 if args.net in ["fcn", "psp"]:
     model_name = "%s-%s-res%s" % (args.savename, args.net, args.res)
@@ -154,6 +156,7 @@ for epoch in range(start_epoch, args.epochs):
 
     for ibatch, batch in bar(enumerate(train_loader)):
         log_counter += 1
+        istep += args.batch_size
 
         imgs, gt_masks = batch['image'], batch['mask']
         imgs, gt_masks = Variable(imgs), Variable(gt_masks)
@@ -187,7 +190,7 @@ for epoch in range(start_epoch, args.epochs):
             log_images('train/pred/masks', pred_masks_asimage, step=log_counter)
             tflogger.flush (step=log_counter-1)
 
-        if args.max_iter is not None and ibatch >= args.max_iter:
+        if args.max_iter is not None and istep >= args.max_iter:
             break
 
     log_value('lr', args.lr, epoch)
@@ -198,18 +201,27 @@ for epoch in range(start_epoch, args.epochs):
     if args.net == "fcn" or args.net == "psp":
         checkpoint_fn = os.path.join(args.pth_dir, "%s-%s-res%s-%s.pth.tar" % (
             args.savename, args.net, args.res, epoch + 1))
+        steps_fn = os.path.join(args.pth_dir, "%s-%s-res%s.steps.txt" % (args.savename, args.net, args.res))
     else:
         checkpoint_fn = os.path.join(args.pth_dir, "%s-%s-%s.pth.tar" % (
             args.savename, args.net, epoch + 1))
+        steps_fn = os.path.join(args.pth_dir, "%s-%s.steps.txt" % (args.savename, args.net))
 
     save_dic = {
         'epoch': epoch + 1,
         'args': args,
+        'istep': istep,
         'g_state_dict': model_g.state_dict(),
         'f1_state_dict': model_f1.state_dict(),
         'optimizer_g': optimizer_g.state_dict(),
         'optimizer_f': optimizer_f.state_dict(),
     }
-
-    if (epoch+1) % args.freq_checkpoint == 0:
+    if 'saved_step' not in vars() or float(istep) / saved_step > 1 + args.freq_checkpoint:
         save_checkpoint(save_dic, is_best=False, filename=checkpoint_fn)
+        with open(steps_fn, 'a') as f:
+            f.write('%d %d\n' % ((epoch+1), istep))
+        saved_step = istep
+
+    if args.max_iter is not None and istep >= args.max_iter:
+        break
+

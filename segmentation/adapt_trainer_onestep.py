@@ -65,8 +65,9 @@ else:
                           label_transform=label_transform, test=False, input_ch=args.input_ch,
                           keys_dict={'image': 'T_image'})
 
+concat_dataset = ConcatDataset([src_dataset, tgt_dataset])
 train_loader = torch.utils.data.DataLoader(
-    ConcatDataset([src_dataset, tgt_dataset]),
+    concat_dataset,
     batch_size=args.batch_size, shuffle=True,
     pin_memory=True)
 
@@ -244,6 +245,7 @@ for epoch in range(start_epoch, args.epochs):
         args.lr = adjust_learning_rate(optimizer_f, args.lr, args.weight_decay, epoch, args.epochs)
 
     checkpoint_fn = os.path.join(pth_dir, "%s-%s.pth.tar" % (model_name, epoch + 1))
+    steps_fn = os.path.join(args.pth_dir, "%s.steps.txt" % model_name)
     save_dic = {
         'epoch': epoch + 1,
         'args': args,
@@ -253,8 +255,11 @@ for epoch in range(start_epoch, args.epochs):
         'optimizer_f': optimizer_f.state_dict(),
         'log_counter': log_counter,
     }
-    if not args.uses_one_classifier:
-        save_dic['f2_state_dict'] = model_f2.state_dict()
-
-    if (epoch+1) % args.freq_checkpoint == 0:
+    def get_step():
+        return epoch * len(concat_dataset)
+    if saved_step not in vars() or float(get_step()) / saved_step > 1 + args.freq_checkpoint:
         save_checkpoint(save_dic, is_best=False, filename=checkpoint_fn)
+        with open(steps_fn, 'a') as f:
+            f.write('%d %d\n' % (epoch, get_step()))
+        saved_step = get_step()
+
