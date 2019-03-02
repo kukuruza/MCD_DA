@@ -13,11 +13,6 @@ for f in $(ls -d ${test_dir}/${basename}-drn_d_105-*.tar); do
   epoch=$(echo $f | sed -n -e "s/.*105-//p" | sed -ne "s/\.tar//p")
   echo 'Epoch='$epoch
 
-  # Test.
-  python source_tester.py citycam \
-    train_output/citycam-${split}_only_3ch/pth/${basename}-drn_d_105-${epoch}.pth.tar \
-    --test_img_shape 64 64  --split ${test_split}
-
   test_epoch_dir=${test_dir}/${basename}-drn_d_105-${epoch}.tar
 
   # Evaluate.
